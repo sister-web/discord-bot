@@ -1333,7 +1333,7 @@ async def _handle_message(message):
                                 )
                                 break
                             except Exception as _e:
-                                if "503" in str(_e) and _retry < 2:
+                                if ("503" in str(_e) or "unavailable" in str(_e).lower()) and _retry < 2:
                                     await asyncio.sleep(2)
                                     continue
                                 raise

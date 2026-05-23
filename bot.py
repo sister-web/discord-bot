@@ -535,7 +535,7 @@ async def send_ticket_log(channel, guild, guild_id, owner_id, settings):
     log_text = "\n".join(lines)
     import re as _re
     safe_name = _re.sub(r"[^a-zA-Z0-9_-]", "_", channel.name)
-    file = discord.File(io.BytesIO(log_text.encode("utf-8")), filename=f"ticket-{safe_name}.txt")
+    file = discord.File(io.BytesIO(log_text.encode("utf-8-sig")), filename=f"ticket-{safe_name}.txt")
     await log_channel.send(f"\U0001f4cb チケットが閉じられました: `{channel.name}`", file=file)
  
  
@@ -1018,7 +1018,7 @@ async def on_message(message):
     if message.guild is None:
         await message.channel.send("このBOTへのメッセージは確認できません。")
         return
-    asyncio.ensure_future(_handle_message(message))
+    asyncio.get_event_loop().create_task(_handle_message(message))
  
 async def _handle_message(message):
     if not message.guild:
@@ -1330,7 +1330,9 @@ async def _handle_message(message):
                             config=cfg
                         )
                         if response.text:
-                            reply_text = response.text.strip()
+                            import re as _re
+                            # 思考テキスト（空白や制御文字）を除去
+                            reply_text = _re.sub(r"^\s+", "", response.text).strip()
                             if not reply_text:
                                 pass
                             else:
@@ -1340,10 +1342,10 @@ async def _handle_message(message):
                                 if len(hist) > 20:
                                     autoreply_histories[message.author.id] = hist[-20:]
                                 try:
-                                    await message.reply(reply_text[:500])
+                                    await message.reply(reply_text[:1000])
                                 except Exception:
                                     try:
-                                        await message.channel.send(reply_text[:500])
+                                        await message.channel.send(reply_text[:1000])
                                     except Exception:
                                         pass
         return

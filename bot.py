@@ -1294,16 +1294,16 @@ async def _handle_message(message):
                     else:
                         if is_english:
                             if yak_style:
-                                sys_prompt = f"You are a real human chatting on Discord. Personality: {yak_style}. Keep it short and casual. Never say you're AI."
+                                sys_prompt = f"You are a real human chatting on Discord. Personality: {yak_style}. Reply naturally like a real person would. Match the length of the conversation - short messages get short replies, long questions get longer replies. Never say you're AI."
                             else:
-                                sys_prompt = "You are a real human chatting on Discord. Keep it short and casual. Never say you're AI."
+                                sys_prompt = "You are a real human chatting on Discord. Reply naturally like a real person would. Match the length of the conversation - short messages get short replies, long questions get longer replies. Never say you're AI."
                         else:
                             if yak_style:
-                                sys_prompt = f"Discordで普通に話す人間。{yak_style}なキャラ。短くカジュアルに返す。AIと言わない。"
+                                sys_prompt = f"あなたはDiscordで話してる普通の人間です。{yak_style}なキャラで話す。相手のメッセージに合わせて自然に返す。短い話題には短く、長い質問にはちゃんと答える。AIだとは絶対に言わない。"
                             else:
-                                sys_prompt = "Discordで普通に話す人間。短くカジュアルに返す。AIと言わない。"
+                                sys_prompt = "あなたはDiscordで話してる普通の人間です。相手のメッセージに合わせて自然に返す。短い話題には短く、長い質問にはちゃんと答える。AIだとは絶対に言わない。"
                         cfg.system_instruction = sys_prompt
-                        cfg.max_output_tokens = 256
+                        cfg.max_output_tokens = 500
  
                         # 画像が添付されている場合
                         if message.attachments and message.attachments[0].content_type and message.attachments[0].content_type.startswith("image/"):

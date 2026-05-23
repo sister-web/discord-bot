@@ -1262,7 +1262,7 @@ async def _handle_message(message):
                     cfg.system_instruction = system
                     cfg.max_output_tokens = 60
                     response = await ai.aio.models.generate_content(
-                        model="gemini-3.5-flash",
+                        model="gemini-3.1-flash",
                         contents=[{"role": "user", "parts": [{"text": message.content}]}],
                         config=cfg
                     )
@@ -1303,9 +1303,9 @@ async def _handle_message(message):
                             else:
                                 sys_prompt = "Discordで話す普通の人間。完結した文を1〜2つ書く。箇条書き・番号・マークダウン禁止。AIと言わない。"
                         cfg.system_instruction = sys_prompt
-                        cfg.max_output_tokens = 200
+                        cfg.max_output_tokens = 80
  
-                        # 画像が添付されている場合は画像も渡してそれに反応
+                        # 画像が添付されている場合
                         if message.attachments and message.attachments[0].content_type and message.attachments[0].content_type.startswith("image/"):
                             img_url = message.attachments[0].url
                             async with aiohttp.ClientSession() as session:
@@ -1325,7 +1325,7 @@ async def _handle_message(message):
                         hist = autoreply_histories.get(message.author.id, [])
                         full_contents = hist + contents if hist else contents
                         response = await ai.aio.models.generate_content(
-                            model="gemini-3.5-flash",
+                            model="gemini-3.1-flash",
                             contents=full_contents,
                             config=cfg
                         )

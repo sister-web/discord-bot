@@ -1262,7 +1262,7 @@ async def _handle_message(message):
                     cfg.system_instruction = system
                     cfg.max_output_tokens = 60
                     response = await ai.aio.models.generate_content(
-                        model="gemini-2.5-flash",
+                        model="gemini-2.5-flash-lite",
                         contents=[{"role": "user", "parts": [{"text": message.content}]}],
                         config=cfg
                     )
@@ -1325,7 +1325,7 @@ async def _handle_message(message):
                         hist = autoreply_histories.get(message.author.id, [])
                         full_contents = hist + contents if hist else contents
                         response = await ai.aio.models.generate_content(
-                            model="gemini-2.5-flash",
+                            model="gemini-2.5-flash-lite",
                             contents=full_contents,
                             config=cfg
                         )

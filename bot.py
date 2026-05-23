@@ -1294,16 +1294,16 @@ async def _handle_message(message):
                     else:
                         if is_english:
                             if yak_style:
-                                sys_prompt = f"You are a real human chatting on Discord with a {yak_style} personality. Reply in casual natural English. 1-2 sentences max. No markdown, no lists, no numbering, no formatting. Never say you're an AI."
+                                sys_prompt = f"You are a real human on Discord. Personality: {yak_style}. Write 1-2 complete sentences. Casual English only. No lists, no markdown, never say you're AI."
                             else:
-                                sys_prompt = "You are a real human chatting on Discord. Reply in casual natural English. 1-2 sentences. No markdown, no lists, no numbering. Never say you're an AI."
+                                sys_prompt = "You are a real human on Discord. Write 1-2 complete sentences. Casual English. No lists, no markdown, never say you're AI."
                         else:
                             if yak_style:
-                                sys_prompt = f"あなたはDiscordで友達と話してる普通の人間です。{yak_style}なキャラで話す。1〜2文で返信。マークダウン禁止・番号禁止・箇条書き禁止。普通の会話文のみ。AIであることは絶対に言わない。"
+                                sys_prompt = f"Discordで話す普通の人間。キャラ：{yak_style}。完結した文を1〜2つ書く。箇条書き・番号・マークダウン禁止。AIと言わない。"
                             else:
-                                sys_prompt = "あなたはDiscordで友達と話してる普通の人間です。1〜2文で自然に返信。マークダウン禁止・番号禁止・箇条書き禁止。普通の会話文のみ。AIであることは絶対に言わない。"
+                                sys_prompt = "Discordで話す普通の人間。完結した文を1〜2つ書く。箇条書き・番号・マークダウン禁止。AIと言わない。"
                         cfg.system_instruction = sys_prompt
-                        cfg.max_output_tokens = 300
+                        cfg.max_output_tokens = 200
  
                         # 画像が添付されている場合は画像も渡してそれに反応
                         if message.attachments and message.attachments[0].content_type and message.attachments[0].content_type.startswith("image/"):

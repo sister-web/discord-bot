@@ -1303,7 +1303,7 @@ async def _handle_message(message):
                             else:
                                 sys_prompt = "Discordで話す普通の人間。完結した文を1〜2つ書く。箇条書き・番号・マークダウン禁止。AIと言わない。"
                         cfg.system_instruction = sys_prompt
-                        cfg.max_output_tokens = 80
+                        cfg.max_output_tokens = 150
  
                         # 画像が添付されている場合
                         if message.attachments and message.attachments[0].content_type and message.attachments[0].content_type.startswith("image/"):

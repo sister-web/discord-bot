@@ -1282,7 +1282,7 @@ async def _handle_message(message):
                     en_words = [w for w in re.findall(r"[a-zA-Z]+", message.content) if len(w) >= 2]
                     is_english = jp_chars == 0 and len(en_words) >= 1
  
-                    script_keywords_jp = ["スクリプト", "無料", "タダ", "ただ", "ください", "くれ", "買いたい", "欲しい", "いくら", "値段", "お金", "円", "売って", "購入"]
+                    script_keywords_jp = ["スクリプト", "無料", "タダ", "ください", "買いたい", "欲しい", "いくら", "値段", "お金", "売って", "購入"]
                     script_keywords_en = ["script", "free", "give me", "gimme", "buy", "purchase", "price", "how much", "cost"]
                     wants_script_jp = not is_english and any(kw in msg_lower for kw in script_keywords_jp)
                     wants_script_en = is_english and any(kw in msg_lower for kw in script_keywords_en)

@@ -1262,7 +1262,7 @@ async def _handle_message(message):
                     cfg.system_instruction = system
                     cfg.max_output_tokens = 60
                     response = await ai.aio.models.generate_content(
-                        model="gemini-2.5-flash-lite",
+                        model="gemini-2.0-flash-lite",
                         contents=[{"role": "user", "parts": [{"text": message.content}]}],
                         config=cfg
                     )
@@ -1324,11 +1324,19 @@ async def _handle_message(message):
                         # 会話履歴を取得
                         hist = autoreply_histories.get(message.author.id, [])
                         full_contents = hist + contents if hist else contents
-                        response = await ai.aio.models.generate_content(
-                            model="gemini-2.5-flash-lite",
-                            contents=full_contents,
-                            config=cfg
-                        )
+                        for _retry in range(3):
+                            try:
+                                response = await ai.aio.models.generate_content(
+                                    model="gemini-2.0-flash-lite",
+                                    contents=full_contents,
+                                    config=cfg
+                                )
+                                break
+                            except Exception as _e:
+                                if "503" in str(_e) and _retry < 2:
+                                    await asyncio.sleep(2)
+                                    continue
+                                raise
                         if response.text:
                             import re as _re
                             # 思考テキスト（空白や制御文字）を除去

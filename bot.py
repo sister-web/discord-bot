@@ -7,19 +7,19 @@ import json
 import os
 import asyncio
 import aiohttp
- 
+
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
 client = discord.Client(intents=intents)
 tree = app_commands.CommandTree(client)
- 
+
 histories = {}
 autoreply_guilds = set()  # 自動返信が有効なギルドID（起動時にsettingsから復元）
 last_bets = {}  # ユーザーごとの最後の賭け金
 autoreply_histories = {}  # 自動返信の会話履歴（ユーザーIDごと）
 _ai_client = None  # Geminiクライアントをキャッシュ
- 
+
 def get_ai_client():
     global _ai_client
     if _ai_client is None:
@@ -27,7 +27,7 @@ def get_ai_client():
     return _ai_client
 SETTINGS_FILE = "/data/settings.json" if os.path.exists("/data") else os.path.join(os.path.dirname(os.path.abspath(__file__)), "settings.json")
 _settings_cache = None
- 
+
 def load_settings():
     global _settings_cache
     if _settings_cache is not None:
@@ -38,13 +38,13 @@ def load_settings():
     else:
         _settings_cache = {}
     return _settings_cache
- 
+
 def save_settings(settings):
     global _settings_cache
     _settings_cache = settings
     with open(SETTINGS_FILE, "w") as f:
         json.dump(settings, f, indent=2)
- 
+
 def can_use_bot(message):
     settings = load_settings()
     guild_id = str(message.guild.id) if message.guild else None
@@ -55,7 +55,7 @@ def can_use_bot(message):
         return False  # ロール未設定なら誰も使えない
     user_role_ids = [str(r.id) for r in message.author.roles]
     return any(r in user_role_ids for r in allowed)
- 
+
 def extract_code(text):
     pattern = r"```(\w+)?\n(.*?)```"
     matches = re.findall(pattern, text, re.DOTALL)
@@ -66,33 +66,33 @@ def extract_code(text):
                "cpp": "cpp", "c": "c", "bash": "sh", "sh": "sh"}.get(lang.lower(), "txt")
         return code.strip(), ext
     return None, None
- 
+
 def remove_code_blocks(text):
     return re.sub(r"```(\w+)?\n.*?```", "[コードはファイルを参照]", text, flags=re.DOTALL).strip()
- 
+
 DEFAULT_MODEL = "gemini-3.5-flash"
 DEFAULT_THINKING = "minimal"
- 
+
 def get_user_settings(user_id):
     settings = load_settings()
     return settings.get("users", {}).get(str(user_id), {})
- 
+
 async def ask_gemini_stream(channel_id, query, reply_msg, new_conversation=False, user_id=None):
     from google.genai import types
     ai = genai.Client(api_key=GEMINI_API_KEY)
- 
+
     if new_conversation or channel_id not in histories:
         histories[channel_id] = []
- 
+
     histories[channel_id].append({"role": "user", "parts": [{"text": query}]})
- 
+
     user_cfg = get_user_settings(user_id) if user_id else {}
     model = user_cfg.get("model", DEFAULT_MODEL)
     thinking = user_cfg.get("thinking", DEFAULT_THINKING)
- 
+
     full_text = ""
     last_edit = 0
- 
+
     for _attempt in range(3):
         try:
             stream = await ai.aio.models.generate_content_stream(
@@ -119,15 +119,15 @@ async def ask_gemini_stream(channel_id, query, reply_msg, new_conversation=False
                 await asyncio.sleep(3)
                 continue
             raise
- 
+
     histories[channel_id].append({"role": "model", "parts": [{"text": full_text}]})
     if len(histories[channel_id]) > 20:
         histories[channel_id] = histories[channel_id][-20:]
- 
+
     return full_text
- 
+
 # ==================== スラッシュコマンド ====================
- 
+
 @tree.command(name="mod", description="自分のモデルと思考レベルを変更します")
 @app_commands.describe(
     モデル="使用するモデルを選んでください（省略可）",
@@ -163,7 +163,7 @@ async def set_mod(interaction: discord.Interaction, モデル: str = None, 思�
         f"✅ 設定を更新しました。\nモデル: `{m}`\n思考レベル: `{t}`",
         ephemeral=True
     )
- 
+
 @tree.command(name="setrole", description="BOTを使えるロールを追加します（管理者のみ）")
 @app_commands.describe(role="使用を許可するロール")
 @app_commands.checks.has_permissions(administrator=True)
@@ -176,7 +176,7 @@ async def setrole(interaction: discord.Interaction, role: discord.Role):
         settings[guild_id]["allowed_roles"].append(str(role.id))
     save_settings(settings)
     await interaction.response.send_message(f"✅ `{role.name}` をBOT使用可能ロールに追加しました。", ephemeral=True)
- 
+
 @tree.command(name="removerole", description="BOT使用ロールを削除します（管理者のみ）")
 @app_commands.describe(role="削除するロール")
 @app_commands.checks.has_permissions(administrator=True)
@@ -189,13 +189,13 @@ async def removerole(interaction: discord.Interaction, role: discord.Role):
         await interaction.response.send_message(f"✅ `{role.name}` を削除しました。", ephemeral=True)
     else:
         await interaction.response.send_message(f"⚠️ `{role.name}` は設定されていません。", ephemeral=True)
- 
+
 @setrole.error
 @removerole.error
 async def role_error(interaction: discord.Interaction, error):
     if isinstance(error, app_commands.MissingPermissions):
         await interaction.response.send_message("⚠️ このコマンドは管理者のみ使えます。", ephemeral=True)
- 
+
 @tree.command(name="dm", description="指定したユーザーにBOTからDMを送ります（管理者のみ）")
 @app_commands.describe(ユーザー="DMを送る相手", メッセージ="送るメッセージ内容", 回数="送る回数（デフォルト1）")
 @app_commands.checks.has_permissions(administrator=True)
@@ -220,12 +220,12 @@ async def send_dm(interaction: discord.Interaction, ユーザー: discord.Member
         await interaction.edit_original_response(content=f"⚠️ {ユーザー.mention} はDMを受け取れない設定になっています。")
     except Exception as e:
         await interaction.edit_original_response(content=f"⚠️ エラー: `{e}`")
- 
+
 @send_dm.error
 async def dm_error(interaction: discord.Interaction, error):
     if isinstance(error, app_commands.MissingPermissions):
         await interaction.response.send_message("⚠️ このコマンドは管理者のみ使えます。", ephemeral=True)
- 
+
 @tree.command(name="mes", description="特定のキーワードへの自動返信を設定します（管理者のみ）")
 @app_commands.describe(
     キーワード="反応するキーワード",
@@ -240,7 +240,7 @@ async def set_mes(interaction: discord.Interaction, キーワード: str, 返信
         settings["mes"] = {}
     if guild_id not in settings["mes"]:
         settings["mes"][guild_id] = {}
- 
+
     if 削除:
         if キーワード in settings["mes"][guild_id]:
             del settings["mes"][guild_id][キーワード]
@@ -249,22 +249,22 @@ async def set_mes(interaction: discord.Interaction, キーワード: str, 返信
         else:
             await interaction.response.send_message(f"⚠️ `{キーワード}` は設定されていません。", ephemeral=True)
         return
- 
+
     if not 返信:
         await interaction.response.send_message("返信内容を入力してください。", ephemeral=True)
         return
- 
+
     replies = [r.strip() for r in 返信.split("|") if r.strip()]
     settings["mes"][guild_id][キーワード] = replies
     save_settings(settings)
     preview = " / ".join(f"`{r}`" for r in replies)
     await interaction.response.send_message(f"✅ `{キーワード}` → {preview} に設定しました。", ephemeral=True)
- 
+
 @set_mes.error
 async def mes_error(interaction: discord.Interaction, error):
     if isinstance(error, app_commands.MissingPermissions):
         await interaction.response.send_message("⚠️ このコマンドは管理者のみ使えます。", ephemeral=True)
- 
+
 @tree.command(name="yak", description="特定ユーザーへの自動返信スタイルを設定します（管理者のみ）")
 @app_commands.describe(
     ユーザー="スタイルを設定するユーザー",
@@ -278,7 +278,7 @@ async def set_yak(interaction: discord.Interaction, ユーザー: discord.Member
         settings["yak"] = {}
     if guild_id not in settings["yak"]:
         settings["yak"][guild_id] = {}
- 
+
     if スタイル in ("なし", "reset", "リセット"):
         settings["yak"][guild_id].pop(str(ユーザー.id), None)
         save_settings(settings)
@@ -287,22 +287,22 @@ async def set_yak(interaction: discord.Interaction, ユーザー: discord.Member
         settings["yak"][guild_id][str(ユーザー.id)] = スタイル
         save_settings(settings)
         await interaction.response.send_message(f"✅ {ユーザー.mention} のスタイルを **{スタイル}** に設定しました。", ephemeral=True)
- 
+
 @set_yak.error
 async def yak_error(interaction: discord.Interaction, error):
     if isinstance(error, app_commands.MissingPermissions):
         await interaction.response.send_message("⚠️ このコマンドは管理者のみ使えます。", ephemeral=True)
- 
- 
- 
+
+
+
 # ==================== カジノ ====================
- 
+
 import random as _casino_random
- 
+
 SLOT_SYMBOLS = ["🍒", "🍋", "🍇", "⭐", "💎", "7️⃣"]
 SLOT_PAYOUTS = {"💎💎💎": 2000, "7️⃣7️⃣7️⃣": 5000, "⭐⭐⭐": 1500,
                 "🍇🍇🍇": 800, "🍋🍋🍋": 600, "🍒🍒🍒": 400}
- 
+
 async def update_kjnpn(guild):
     settings = load_settings()
     guild_id = str(guild.id)
@@ -317,7 +317,7 @@ async def update_kjnpn(guild):
         msg = await ch.fetch_message(int(msg_id))
     except Exception:
         return
- 
+
     role_id = settings.get("kjn_role", {}).get(guild_id)
     balances = settings.get("casino", {}).get(guild_id, {})
     entries = []
@@ -330,10 +330,10 @@ async def update_kjnpn(guild):
         entries.append(member.display_name + "\n``" + str(bal) + "円``")
     body = "\n\n".join(entries) if entries else "データなし"
     await msg.edit(content=f"💰 **残高一覧**\n\n{body}")
- 
+
 def get_balance(settings, guild_id, user_id):
     return settings.get("casino", {}).get(guild_id, {}).get(str(user_id), 1500)
- 
+
 def set_balance(settings, guild_id, user_id, amount):
     if "casino" not in settings:
         settings["casino"] = {}
@@ -341,18 +341,18 @@ def set_balance(settings, guild_id, user_id, amount):
         settings["casino"][guild_id] = {}
     settings["casino"][guild_id][str(user_id)] = max(-2000, amount)
     save_settings(settings)
- 
+
 def can_use_casino(message, settings):
     guild_id = str(message.guild.id)
     role_id = settings.get("kjn_role", {}).get(guild_id)
     if not role_id:
         return False  # ロール未設定なら誰も使えない
     return any(str(r.id) == role_id for r in message.author.roles)
- 
- 
+
+
 class BetModal(discord.ui.Modal, title="賭け金を入力"):
     amount = discord.ui.TextInput(label="賭け金 (1以上の整数)", placeholder="例: 200", required=True)
- 
+
     async def on_submit(self, interaction: discord.Interaction):
         settings = load_settings()
         guild_id = str(interaction.guild.id)
@@ -363,18 +363,18 @@ class BetModal(discord.ui.Modal, title="賭け金を入力"):
         except ValueError:
             await interaction.response.send_message("❌ 正しい金額を入力してください。", ephemeral=True)
             return
- 
+
         bal = get_balance(settings, guild_id, interaction.user.id)
         if bal - bet < -2000:
             await interaction.response.send_message(f"💸 残高不足！現在の残高: **{bal}円**", ephemeral=True)
             return
- 
+
         # 賭け金に応じて当たり確率を調整（多いほど当たりやすい）
         base_symbols = ["🍒", "🍋", "🍇", "⭐", "💎", "7️⃣"]
         # 賭け金が多いほど高額シンボルが激出やすい
         # 🍒60% 🍋55% 🍇50% ⭐45% 7️⃣35% 💎30% (固定)
         weights = [60, 55, 50, 45, 35, 30]
- 
+
         # 1リール目を決めて、一定確率で揃える
         reel1 = _casino_random.choices(base_symbols, weights=weights)[0]
         idx = base_symbols.index(reel1)
@@ -395,7 +395,7 @@ class BetModal(discord.ui.Modal, title="賭け金を入力"):
             match_chance = 0.42
         else:
             match_chance = 0.38
- 
+
         if _casino_random.random() < match_chance:
             reels = [reel1, reel1, reel1]
         else:
@@ -405,9 +405,9 @@ class BetModal(discord.ui.Modal, title="賭け金を入力"):
                 others = [s for s in base_symbols if s != reel1]
                 reels.append(_casino_random.choice(others))
             _casino_random.shuffle(reels)
- 
+
         result = "".join(reels)
- 
+
         # 払い戻し倍率
         sym_multipliers = {
             "💎💎💎": 6.0,
@@ -424,7 +424,7 @@ class BetModal(discord.ui.Modal, title="賭け金を入力"):
         set_balance(settings, guild_id, interaction.user.id, new_bal)
         last_bets[interaction.user.id] = bet
         asyncio.ensure_future(update_kjnpn(interaction.guild))
- 
+
         if payout > 0:
             txt = f"**{reels[0]} {reels[1]} {reels[2]}**\n🎉 当たり！ **+{payout}円** ({sym_mult}×)\n残高: **{new_bal}円**"
         else:
@@ -433,12 +433,12 @@ class BetModal(discord.ui.Modal, title="賭け金を入力"):
             await interaction.response.send_message(txt, ephemeral=True)
         except Exception:
             pass
- 
- 
+
+
 class CasinoPanelView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
- 
+
     @discord.ui.button(label="🎰 スロットを回す", style=discord.ButtonStyle.primary, custom_id="casino_play")
     async def play(self, interaction: discord.Interaction, button: discord.ui.Button):
         settings = load_settings()
@@ -450,32 +450,32 @@ class CasinoPanelView(discord.ui.View):
         bal = get_balance(settings, guild_id, interaction.user.id)
         txt2 = "💰 現在の残高: **" + str(bal) + "円**\n貭け金を入力してください。"
         await interaction.response.send_message(txt2, ephemeral=True, view=BetButtonView())
- 
+
     @discord.ui.button(label="💰 残高確認", style=discord.ButtonStyle.secondary, custom_id="casino_balance")
     async def balance(self, interaction: discord.Interaction, button: discord.ui.Button):
         settings = load_settings()
         bal = get_balance(settings, str(interaction.guild.id), interaction.user.id)
         await interaction.response.send_message(f"💰 あなたの残高: **{bal}円**", ephemeral=True)
- 
- 
+
+
 class BetButtonView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
- 
+
     @discord.ui.button(label="金額を入力して賭ける", style=discord.ButtonStyle.success, custom_id="casino_bet_input")
     async def bet(self, interaction: discord.Interaction, button: discord.ui.Button):
         try:
             await interaction.response.send_modal(BetModal())
         except Exception:
             pass
- 
- 
+
+
 class GifView(discord.ui.View):
     def __init__(self, amount: int = 500):
         super().__init__(timeout=60)
         self.participants = []
         self.amount = amount
- 
+
     @discord.ui.button(label="🎁 参加する", style=discord.ButtonStyle.success, custom_id="gif_join")
     async def join(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id in self.participants:
@@ -483,7 +483,7 @@ class GifView(discord.ui.View):
             return
         self.participants.append(interaction.user.id)
         await interaction.response.send_message(f"✅ 参加しました！現在 {len(self.participants)} 人", ephemeral=True)
- 
+
     @discord.ui.button(label="🎰 抽選する", style=discord.ButtonStyle.primary, custom_id="gif_draw")
     async def draw(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not interaction.user.guild_permissions.administrator:
@@ -505,9 +505,9 @@ class GifView(discord.ui.View):
         await interaction.response.edit_message(
             content="\U0001f389 **抽選結果！**\n" + winner.mention + " が当選！500円GET！\n残高: " + str(bal+500) + "円",
         )
- 
+
 # ==================== チケット ====================
- 
+
 async def send_ticket_log(channel, guild, guild_id, owner_id, settings):
     from datetime import timezone
     log_channel_id = settings.get("ticket", {}).get(guild_id, {}).get("log_channel_id")
@@ -516,7 +516,7 @@ async def send_ticket_log(channel, guild, guild_id, owner_id, settings):
     log_channel = guild.get_channel(int(log_channel_id))
     if not log_channel:
         return
- 
+
     # チャンネルのメッセージを取得してログを作成
     lines = [f"=== チケットログ: #{channel.name} ==="]
     owner = guild.get_member(int(owner_id)) if owner_id else None
@@ -524,25 +524,25 @@ async def send_ticket_log(channel, guild, guild_id, owner_id, settings):
     roblox_id = settings.get("ticket", {}).get(guild_id, {}).get("ticket_data", {}).get(str(owner_id), {}).get("roblox_id", "未入力")
     lines.append(f"Roblox ID: {roblox_id}")
     lines.append("")
- 
+
     async for msg in channel.history(limit=500, oldest_first=True):
         if msg.author.bot and msg.content in ("🔒 チケットを閉じます...",):
             continue
         ts = msg.created_at.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
         attachments = " [添付ファイル]" if msg.attachments else ""
         lines.append(f"[{ts}] {msg.author.display_name}: {msg.content}{attachments}")
- 
+
     log_text = "\n".join(lines)
     import re as _re
     safe_name = _re.sub(r"[^a-zA-Z0-9_-]", "_", channel.name)
     file = discord.File(io.BytesIO(log_text.encode("utf-8-sig")), filename=f"ticket-{safe_name}.txt")
     await log_channel.send(f"\U0001f4cb チケットが閉じられました: `{channel.name}`", file=file)
- 
- 
+
+
 class TicketCreateButton(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
- 
+
     @discord.ui.button(label="🎫 チケットを作成", style=discord.ButtonStyle.primary, custom_id="ticket_create")
     async def create_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
         settings = load_settings()
@@ -550,7 +550,7 @@ class TicketCreateButton(discord.ui.View):
         ticket_cfg = settings.get("ticket", {}).get(guild_id, {})
         category_id = ticket_cfg.get("category_id")
         mention_role_id = ticket_cfg.get("mention_role_id")
- 
+
         # 既存チケットチェック
         existing = ticket_cfg.get("open_tickets", {}).get(str(interaction.user.id))
         if existing:
@@ -558,7 +558,7 @@ class TicketCreateButton(discord.ui.View):
             if ch:
                 await interaction.response.send_message(f"⚠️ すでにチケットがあります: {ch.mention}", ephemeral=True)
                 return
- 
+
         # チャンネル作成
         category = interaction.guild.get_channel(int(category_id)) if category_id else None
         overwrites = {
@@ -570,13 +570,13 @@ class TicketCreateButton(discord.ui.View):
             role = interaction.guild.get_role(int(mention_role_id))
             if role:
                 overwrites[role] = discord.PermissionOverwrite(view_channel=True, send_messages=True)
- 
+
         ch = await interaction.guild.create_text_channel(
             f"ticket-{interaction.user.name}",
             category=category,
             overwrites=overwrites
         )
- 
+
         # チケット記録
         if "ticket" not in settings:
             settings["ticket"] = {}
@@ -586,29 +586,29 @@ class TicketCreateButton(discord.ui.View):
             settings["ticket"][guild_id]["open_tickets"] = {}
         settings["ticket"][guild_id]["open_tickets"][str(interaction.user.id)] = str(ch.id)
         save_settings(settings)
- 
+
         await interaction.response.send_message(f"✅ チケットを作成しました: {ch.mention}", ephemeral=True)
- 
+
         # ロールメンション
         mention_txt = ""
         if mention_role_id:
             role = interaction.guild.get_role(int(mention_role_id))
             if role:
                 mention_txt = role.mention
- 
+
         # チケット内パネル送信
         desc = f"{interaction.user.mention} のチケットです。\nまずRoblox IDを入力してください。"
         embed = discord.Embed(title="🎫 チケット", description=desc, color=discord.Color.blue())
         await ch.send(content=mention_txt if mention_txt else None, embed=embed, view=TicketPanelView(str(interaction.user.id)))
- 
- 
+
+
 class RobloxIDModal(discord.ui.Modal, title="Roblox IDを入力"):
     roblox_id = discord.ui.TextInput(label="Roblox ID", placeholder="hanakuso", required=True)
- 
+
     def __init__(self, user_id: str):
         super().__init__()
         self.user_id = user_id
- 
+
     async def on_submit(self, interaction: discord.Interaction):
         settings = load_settings()
         guild_id = str(interaction.guild.id)
@@ -620,9 +620,9 @@ class RobloxIDModal(discord.ui.Modal, title="Roblox IDを入力"):
             settings["ticket"][guild_id]["ticket_data"] = {}
         settings["ticket"][guild_id]["ticket_data"][self.user_id] = {"roblox_id": self.roblox_id.value}
         save_settings(settings)
- 
+
         await interaction.response.defer()
- 
+
         # Roblox APIでユーザー情報取得
         username = self.roblox_id.value.strip()
         avatar_url = None
@@ -649,7 +649,7 @@ class RobloxIDModal(discord.ui.Modal, title="Roblox IDを入力"):
                                 avatar_url = thumb_list[0].get("imageUrl")
         except Exception:
             pass
- 
+
         embed = discord.Embed(title="商品を選択してください", color=discord.Color.green())
         embed.add_field(name="Roblox ID", value=username)
         if display_name:
@@ -657,13 +657,13 @@ class RobloxIDModal(discord.ui.Modal, title="Roblox IDを入力"):
         if avatar_url:
             embed.set_thumbnail(url=avatar_url)
         await interaction.edit_original_response(embed=embed, view=ProductSelectView(self.user_id, username))
- 
- 
+
+
 class LuaPurchaseView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
         self.add_item(discord.ui.Button(label="🛒 ゲームパスを購入", url="https://www.roblox.com/game-pass/1833026954", style=discord.ButtonStyle.link, row=0))
- 
+
     @discord.ui.button(label="🔒 チケットを閉じる", style=discord.ButtonStyle.danger, custom_id="lua_ticket_close", row=1)
     async def close_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
         settings = load_settings()
@@ -681,7 +681,7 @@ class LuaPurchaseView(discord.ui.View):
             save_settings(settings)
         await asyncio.sleep(2)
         await interaction.channel.delete()
- 
+
 def get_roblox_id_from_channel(interaction: discord.Interaction):
     settings = load_settings()
     guild_id = str(interaction.guild.id)
@@ -690,8 +690,8 @@ def get_roblox_id_from_channel(interaction: discord.Interaction):
     if owner_id:
         return settings.get("ticket", {}).get(guild_id, {}).get("ticket_data", {}).get(owner_id, {}).get("roblox_id", "不明")
     return "不明"
- 
- 
+
+
 class HubPriceView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -705,7 +705,7 @@ class HubPriceView(discord.ui.View):
         for label, url, cid in plans:
             self.add_item(discord.ui.Button(label=label, url=url, style=discord.ButtonStyle.link))
         self.add_item(discord.ui.Button(label="🔒 チケットを閉じる", style=discord.ButtonStyle.danger, custom_id="hub_close"))
- 
+
     async def interaction_check(self, interaction: discord.Interaction):
         if interaction.data.get("custom_id") == "hub_close":
             settings = load_settings()
@@ -725,15 +725,15 @@ class HubPriceView(discord.ui.View):
             await interaction.channel.delete()
             return False
         return True
- 
- 
+
+
 class LuaPriceView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
         self.add_item(discord.ui.Button(label="1 Month  400R$", url="https://www.roblox.com/game-pass/1853116337", style=discord.ButtonStyle.link, row=0))
         self.add_item(discord.ui.Button(label="2 Month  500R$", url="https://www.roblox.com/game-pass/1833026954", style=discord.ButtonStyle.link, row=0))
         self.add_item(discord.ui.Button(label="🔒 チケットを閉じる", style=discord.ButtonStyle.danger, custom_id="lua_price_close", row=1))
- 
+
     async def interaction_check(self, interaction: discord.Interaction):
         cid = interaction.data.get("custom_id")
         if cid == "lua_price_close":
@@ -754,14 +754,14 @@ class LuaPriceView(discord.ui.View):
             await interaction.channel.delete()
             return False
         return True
- 
- 
+
+
 class ProductSelectView(discord.ui.View):
     def __init__(self, user_id: str = None, roblox_id: str = None):
         super().__init__(timeout=None)
         self.user_id = user_id
         self.roblox_id = roblox_id
- 
+
     @discord.ui.button(label="DoDo HUB", style=discord.ButtonStyle.secondary, custom_id="product_hub")
     async def select_hub(self, interaction: discord.Interaction, button: discord.ui.Button):
         rid = self.roblox_id or get_roblox_id_from_channel(interaction)
@@ -770,7 +770,7 @@ class ProductSelectView(discord.ui.View):
         embed.add_field(name="商品", value="DoDo HUB")
         embed.add_field(name="​", value="購入したら写真を送ってください。", inline=False)
         await interaction.response.edit_message(embed=embed, view=HubPriceView())
- 
+
     @discord.ui.button(label="DoDo HUB lua", style=discord.ButtonStyle.primary, custom_id="product_lua")
     async def select_lua(self, interaction: discord.Interaction, button: discord.ui.Button):
         rid = self.roblox_id or get_roblox_id_from_channel(interaction)
@@ -779,19 +779,19 @@ class ProductSelectView(discord.ui.View):
         embed.add_field(name="商品", value="DoDo HUB lua")
         embed.add_field(name="​", value="購入したら写真を送ってください。", inline=False)
         await interaction.response.edit_message(embed=embed, view=LuaPriceView())
- 
- 
+
+
 class TicketPanelView(discord.ui.View):
     def __init__(self, user_id: str = None):
         super().__init__(timeout=None)
         self.user_id = user_id
- 
+
     def get_owner(self, interaction: discord.Interaction):
         settings = load_settings()
         guild_id = str(interaction.guild.id)
         open_tickets = settings.get("ticket", {}).get(guild_id, {}).get("open_tickets", {})
         return next((uid for uid, cid in open_tickets.items() if cid == str(interaction.channel.id)), None)
- 
+
     @discord.ui.button(label="📝 Roblox IDを入力", style=discord.ButtonStyle.primary, custom_id="ticket_input_roblox")
     async def input_roblox(self, interaction: discord.Interaction, button: discord.ui.Button):
         owner_id = self.get_owner(interaction)
@@ -799,7 +799,7 @@ class TicketPanelView(discord.ui.View):
             await interaction.response.send_message("⚠️ チケット作成者のみ入力できます。", ephemeral=True)
             return
         await interaction.response.send_modal(RobloxIDModal(owner_id))
- 
+
     @discord.ui.button(label="🔒 チケットを閉じる", style=discord.ButtonStyle.danger, custom_id="ticket_close")
     async def close_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
         settings = load_settings()
@@ -816,8 +816,8 @@ class TicketPanelView(discord.ui.View):
         await interaction.response.send_message("🔒 チケットを閉じます...")
         await asyncio.sleep(3)
         await interaction.channel.delete()
- 
- 
+
+
 @tree.command(name="ticket", description="チケット作成パネルを設置します（管理者のみ）")
 @app_commands.describe(
     カテゴリー="チケットチャンネルを作成するカテゴリー",
@@ -838,7 +838,7 @@ async def setup_ticket(interaction: discord.Interaction, カテゴリー: discor
     if ログチャンネル:
         settings["ticket"][guild_id]["log_channel_id"] = str(ログチャンネル.id)
     save_settings(settings)
- 
+
     embed = discord.Embed(
         title="🎫 チケット",
         description="下のボタンを押してチケットを作成してください。",
@@ -846,12 +846,12 @@ async def setup_ticket(interaction: discord.Interaction, カテゴリー: discor
     )
     await interaction.channel.send(embed=embed, view=TicketCreateButton())
     await interaction.response.send_message("✅ チケットパネルを設置しました。", ephemeral=True)
- 
+
 @setup_ticket.error
 async def ticket_error(interaction: discord.Interaction, error):
     if isinstance(error, app_commands.MissingPermissions):
         await interaction.response.send_message("⚠️ このコマンドは管理者のみ使えます。", ephemeral=True)
- 
+
 @tree.command(name="bl", description="自動返信しないチャンネルを設定します（管理者のみ）")
 @app_commands.describe(
     チャンネル="対象チャンネル",
@@ -865,7 +865,7 @@ async def set_bl(interaction: discord.Interaction, チャンネル: discord.Text
         settings["bl_channels"] = {}
     if guild_id not in settings["bl_channels"]:
         settings["bl_channels"][guild_id] = []
- 
+
     cid = str(チャンネル.id)
     if 解除:
         if cid in settings["bl_channels"][guild_id]:
@@ -879,12 +879,12 @@ async def set_bl(interaction: discord.Interaction, チャンネル: discord.Text
             settings["bl_channels"][guild_id].append(cid)
         save_settings(settings)
         await interaction.response.send_message(f"✅ {チャンネル.mention} を自動返信しないチャンネルに設定しました。", ephemeral=True)
- 
+
 @set_bl.error
 async def bl_error(interaction: discord.Interaction, error):
     if isinstance(error, app_commands.MissingPermissions):
         await interaction.response.send_message("⚠️ このコマンドは管理者のみ使えます。", ephemeral=True)
- 
+
 @tree.command(name="kjn", description="カジノを使えるロールを設定します（管理者のみ）")
 @app_commands.describe(ロール="カジノ使用を許可するロール")
 @app_commands.checks.has_permissions(administrator=True)
@@ -896,14 +896,14 @@ async def set_kjn_role(interaction: discord.Interaction, ロール: discord.Role
     settings["kjn_role"][guild_id] = str(ロール.id)
     save_settings(settings)
     await interaction.response.send_message(f"✅ `{ロール.name}` をカジノ使用ロールに設定しました。", ephemeral=True)
- 
+
 @tree.command(name="zn", description="全員の残高を確認します（自分にのみ表示）")
 async def show_balances(interaction: discord.Interaction):
     settings = load_settings()
     guild_id = str(interaction.guild.id)
     role_id = settings.get("kjn_role", {}).get(guild_id)
     balances = settings.get("casino", {}).get(guild_id, {})
- 
+
     lines = []
     for uid, bal in sorted(balances.items(), key=lambda x: -x[1]):
         member = interaction.guild.get_member(int(uid))
@@ -913,13 +913,13 @@ async def show_balances(interaction: discord.Interaction):
         if role_id and not any(str(r.id) == role_id for r in member.roles):
             continue
         lines.append(f"{member.display_name}: **{bal}円**")
- 
+
     if not lines:
         await interaction.response.send_message("残高データがありません。", ephemeral=True)
         return
     txt3 = "💰 **残高一覧**\n" + "\n".join(lines)
     await interaction.response.send_message(txt3, ephemeral=True)
- 
+
 @tree.command(name="bi", description="スロットの倍率を変更します（管理者のみ）")
 @app_commands.describe(倍率="掛け金に掛ける倍率（例: 1, 1.5, 2）")
 @app_commands.checks.has_permissions(administrator=True)
@@ -937,12 +937,12 @@ async def set_mult(interaction: discord.Interaction, 倍率: str):
     settings["slot_mult"][str(interaction.guild.id)] = m
     save_settings(settings)
     await interaction.response.send_message(f"✅ 倍率を **{m}倍** に設定しました。", ephemeral=True)
- 
+
 @set_mult.error
 async def bi_error(interaction: discord.Interaction, error):
     if isinstance(error, app_commands.MissingPermissions):
         await interaction.response.send_message("⚠️ このコマンドは管理者のみ使えます。", ephemeral=True)
- 
+
 @tree.command(name="kjnpn", description="残高をリアルタイム表示するチャンネルを設定します（管理者のみ）")
 @app_commands.describe(チャンネル="表示するチャンネル")
 @app_commands.checks.has_permissions(administrator=True)
@@ -953,7 +953,7 @@ async def set_kjnpn(interaction: discord.Interaction, チャンネル: discord.T
         settings["kjnpn"] = {}
     settings["kjnpn"][guild_id] = str(チャンネル.id)
     save_settings(settings)
- 
+
     # 初回メッセージを送信してIDを保存
     msg = await チャンネル.send("💰 **残高一覧** (更新中...)")
     settings["kjnpn_msg"] = settings.get("kjnpn_msg", {})
@@ -961,12 +961,12 @@ async def set_kjnpn(interaction: discord.Interaction, チャンネル: discord.T
     save_settings(settings)
     await interaction.response.send_message(f"✅ {チャンネル.mention} に残高パネルを設置しました。", ephemeral=True)
     await update_kjnpn(interaction.guild)
- 
+
 @set_kjnpn.error
 async def kjnpn_error(interaction: discord.Interaction, error):
     if isinstance(error, app_commands.MissingPermissions):
         await interaction.response.send_message("⚠️ このコマンドは管理者のみ使えます。", ephemeral=True)
- 
+
 @tree.command(name="kjnn", description="カジノパネルを設置します（管理者のみ）")
 @app_commands.checks.has_permissions(administrator=True)
 async def setup_casino(interaction: discord.Interaction):
@@ -977,19 +977,19 @@ async def setup_casino(interaction: discord.Interaction):
     embed.add_field(name="🎰 シンボル確率", value="🍒 60% | 🍋 55% | 🍇 50% | ⭐ 45% | 7️⃣ 35% | 💎 30%", inline=False)
     await interaction.channel.send(embed=embed, view=CasinoPanelView())
     await interaction.response.send_message("✅ カジノパネルを設置しました。", ephemeral=True)
- 
+
 @setup_casino.error
 async def kjnn_error(interaction: discord.Interaction, error):
     if isinstance(error, app_commands.MissingPermissions):
         await interaction.response.send_message("⚠️ このコマンドは管理者のみ使えます。", ephemeral=True)
- 
+
 @set_kjn_role.error
 async def kjn_error(interaction: discord.Interaction, error):
     if isinstance(error, app_commands.MissingPermissions):
         await interaction.response.send_message("⚠️ このコマンドは管理者のみ使えます。", ephemeral=True)
- 
+
 # ==================== プレフィックスコマンド ====================
- 
+
 @client.event
 async def on_ready():
     # 永続ビューを登録（再起動後もボタンが機能する）
@@ -1010,7 +1010,7 @@ async def on_ready():
     for gid in settings.get("autoreply_guilds", []):
         autoreply_guilds.add(int(gid))
     print(f"✅ 起動しました: {client.user}")
- 
+
 @client.event
 async def on_message(message):
     if message.author.bot:
@@ -1019,14 +1019,14 @@ async def on_message(message):
         await message.channel.send("このBOTへのメッセージは確認できません。")
         return
     asyncio.get_event_loop().create_task(_handle_message(message))
- 
+
 async def _handle_message(message):
     if not message.guild:
         return
- 
+
     guild_id = str(message.guild.id)
     settings = load_settings()
- 
+
     # チケットチャンネルで画像が送られたらロールメンション
     settings = load_settings()
     guild_id = str(message.guild.id) if message.guild else None
@@ -1039,7 +1039,7 @@ async def _handle_message(message):
                 role = message.guild.get_role(int(mention_role_id))
                 if role:
                     await message.channel.send(f"{role.mention} 購入確認の写真が届きました！")
- 
+
     # ?jo - 自動返信モデル確認
     if message.content.strip() == "?jo":
         await message.delete()
@@ -1058,7 +1058,7 @@ async def _handle_message(message):
         await asyncio.sleep(10)
         await msg.delete()
         return
- 
+
     # !kjn - カジノパネル
     if message.content.strip() == "!kjn":
         settings = load_settings()
@@ -1071,7 +1071,7 @@ async def _handle_message(message):
         await message.channel.send(embed=embed, view=CasinoPanelView())
         await message.delete()
         return
- 
+
     # !zn+ @user 金額 - 管理者が残高を付与
     if message.content.startswith("!zn+ "):
         if not message.author.guild_permissions.administrator:
@@ -1096,7 +1096,7 @@ async def _handle_message(message):
         asyncio.ensure_future(update_kjnpn(message.guild))
         await message.reply(target.mention + " に **" + str(amount) + "円** 付与しました！残高: **" + str(cur + amount) + "円**")
         return
- 
+
     # !zn- @user 金額 - 管理者が残高を減らす
     if message.content.startswith("!zn- "):
         if not message.author.guild_permissions.administrator:
@@ -1121,7 +1121,7 @@ async def _handle_message(message):
         await message.reply(target.mention + " の残高を **" + str(amount) + "円** 減らしました。残高: **" + str(cur - amount) + "円**")
         asyncio.ensure_future(update_kjnpn(message.guild))
         return
- 
+
     # !v @user 金額 - 送金
     if message.content.startswith("!v "):
         settings = load_settings()
@@ -1150,7 +1150,7 @@ async def _handle_message(message):
         txt = "✅ " + target.mention + " に **" + str(amount) + "円** 送金しました！\nあなたの残高: **" + str(sender_bal - amount) + "円**"
         await message.reply(txt)
         return
- 
+
     # ?gif - ランダムプレゼント
     if message.content.startswith("?gif"):
         parts = message.content.split()
@@ -1165,7 +1165,51 @@ async def _handle_message(message):
         await message.channel.send(embed=embed, view=GifView(gif_amount))
         await message.delete()
         return
- 
+
+    # ?ban @ユーザー - BANコマンド
+    if message.content.startswith("?ban ") and message.mentions:
+        if not message.author.guild_permissions.ban_members:
+            await message.reply("⚠️ BAN権限がありません。")
+            return
+        target = message.mentions[0]
+        try:
+            await target.ban(reason=f"BANby{message.author.name}")
+            await message.reply(f"🔨 {target.mention} をBANしました。")
+        except Exception as e:
+            await message.reply(f"⚠️ エラー: {e}")
+        return
+
+    # ?to @ユーザー 時間 - タイムアウト（最大28日）
+    if message.content.startswith("?to ") and message.mentions:
+        if not message.author.guild_permissions.moderate_members:
+            await message.reply("⚠️ タイムアウト権限がありません。")
+            return
+        parts = message.content.split()
+        if len(parts) < 3:
+            await message.reply("使い方: `?to @ユーザー 時間` (例: 1h, 30m, 7d, 28d)")
+            return
+        time_str = parts[-1].lower()
+        seconds = 0
+        if time_str.endswith("m"):
+            seconds = int(time_str[:-1]) * 60
+        elif time_str.endswith("h"):
+            seconds = int(time_str[:-1]) * 3600
+        elif time_str.endswith("d"):
+            seconds = int(time_str[:-1]) * 86400
+        else:
+            await message.reply("時間形式: 30m / 1h / 7d / 28d")
+            return
+        seconds = min(seconds, 28 * 86400)  # 最大28日
+        target = message.mentions[0]
+        from datetime import timedelta, timezone, datetime
+        until = datetime.now(timezone.utc) + timedelta(seconds=seconds)
+        try:
+            await target.timeout(until, reason=f"TOby{message.author.name}")
+            await message.reply(f"⏰ {target.mention} を {time_str} タイムアウトしました。")
+        except Exception as e:
+            await message.reply(f"⚠️ エラー: {e}")
+        return
+
     # ?j - 自動返信ON/OFF
     if message.content.strip() in ("?j", "？j", "?ｊ", "？ｊ"):
         gid = message.guild.id
@@ -1189,7 +1233,7 @@ async def _handle_message(message):
         await asyncio.sleep(10)
         await msg.delete()
         return
- 
+
     # 自動返信処理
     # チケットチャンネルでは自動返信しない
     open_tickets_all = settings.get("ticket", {}).get(str(message.guild.id), {}).get("open_tickets", {})
@@ -1217,7 +1261,7 @@ async def _handle_message(message):
                 if keyword.lower() in message.content.lower():
                     matched = random.choice(replies)
                     break
- 
+
             if matched:
                 await message.reply(matched)
             else:
@@ -1247,16 +1291,16 @@ async def _handle_message(message):
                             if impersonate_target:
                                 break
                         break
- 
+
                 # 「なにしてる」系でメンバー特定できない場合はスルー（bot宛ては除く）
                 if has_nani_kw and not impersonate_target and not is_bot_mention and not is_reply_to_bot:
                     return
- 
+
                 ai_model = "gemini-3.5-flash"
                 cfg = types.GenerateContentConfig(
                     max_output_tokens=120
                 )
- 
+
                 if impersonate_target:
                     system = f"Discordで友達に{impersonate_name}が何してるか聞かれた。「たぶん〇〇してないの絵文字」みたいな超短い一言で答える。推測口調。絵文字1個だけ。句読点なし。"
                     cfg.system_instruction = system
@@ -1277,16 +1321,16 @@ async def _handle_message(message):
                 else:
                     yak_style = settings.get("yak", {}).get(guild_id, {}).get(str(message.author.id))
                     msg_lower = message.content.lower()
- 
+
                     jp_chars = sum(1 for c in message.content if unicodedata.east_asian_width(c) in ('W', 'F', 'H') and ord(c) > 127)
                     en_words = [w for w in re.findall(r"[a-zA-Z]+", message.content) if len(w) >= 2]
                     is_english = jp_chars == 0 and len(en_words) >= 1
- 
+
                     script_keywords_jp = ["スクリプト", "無料", "タダ", "ください", "買いたい", "欲しい", "いくら", "値段", "お金", "売って", "購入"]
                     script_keywords_en = ["script", "free", "give me", "gimme", "buy", "purchase", "price", "how much", "cost"]
                     wants_script_jp = not is_english and any(kw in msg_lower for kw in script_keywords_jp)
                     wants_script_en = is_english and any(kw in msg_lower for kw in script_keywords_en)
- 
+
                     if wants_script_jp:
                         await message.reply("スクリプトは有料です。購入希望の方はチケットを作成してください！🎫")
                     elif wants_script_en:
@@ -1294,17 +1338,17 @@ async def _handle_message(message):
                     else:
                         if is_english:
                             if yak_style:
-                                sys_prompt = f"You are a real human chatting on Discord. Personality: {yak_style}. Reply naturally like a real person would. Match the length of the conversation - short messages get short replies, long questions get longer replies. Never say you're AI."
+                                sys_prompt = f"you're a real person on discord, {yak_style} personality. text like a normal human - casual, no punctuation at end, typos ok, short replies for short messages. never ask multiple questions. don't sound like AI."
                             else:
-                                sys_prompt = "You are a real human chatting on Discord. Reply naturally like a real person would. Match the length of the conversation - short messages get short replies, long questions get longer replies. Never say you're AI."
+                                sys_prompt = "you're a real person on discord. text like a normal human - casual, no punctuation at end, typos ok, short replies for short messages. never ask multiple questions. don't sound like AI."
                         else:
                             if yak_style:
-                                sys_prompt = f"あなたはDiscordで話してる普通の人間です。{yak_style}なキャラで話す。相手のメッセージに合わせて自然に返す。短い話題には短く、長い質問にはちゃんと答える。AIだとは絶対に言わない。"
+                                sys_prompt = f"discordでチャットしてる普通の人間。{yak_style}なキャラ。一言返しも多用する。長くなりすぎない。語尾に句読点つけない。改行少なめ。質問は1つまで。AIっぽさ禁止。"
                             else:
-                                sys_prompt = "あなたはDiscordで話してる普通の人間です。相手のメッセージに合わせて自然に返す。短い話題には短く、長い質問にはちゃんと答える。AIだとは絶対に言わない。"
+                                sys_prompt = "discordでチャットしてる普通の人間。一言返しも多用する。たまに長く返すこともある。語尾に句読点つけない。改行少なめ。質問は1つまで。AIっぽさ禁止。"
                         cfg.system_instruction = sys_prompt
                         cfg.max_output_tokens = 500
- 
+
                         # 画像が添付されている場合
                         if message.attachments and message.attachments[0].content_type and message.attachments[0].content_type.startswith("image/"):
                             img_url = message.attachments[0].url
@@ -1320,7 +1364,7 @@ async def _handle_message(message):
                             ]}]
                         else:
                             contents = [{"role": "user", "parts": [{"text": message.content or "…"}]}]
- 
+
                         # 会話履歴を取得
                         hist = autoreply_histories.get(message.author.id, [])
                         full_contents = hist + contents if hist else contents
@@ -1340,7 +1384,8 @@ async def _handle_message(message):
                         if response.text:
                             import re as _re
                             # 思考テキスト（空白や制御文字）を除去
-                            reply_text = _re.sub(r"^\s+", "", response.text).strip()
+                            reply_text = response.text.strip()
+                            reply_text = _re.sub(r"\n{3,}", "\n", reply_text)  # 連続改行を1つに
                             if not reply_text:
                                 pass
                             else:
@@ -1357,7 +1402,7 @@ async def _handle_message(message):
                                     except Exception:
                                         pass
         return
- 
+
     # ?rol
     if message.content == "?rol":
         allowed = settings.get(guild_id, {}).get("allowed_roles", [])
@@ -1374,7 +1419,7 @@ async def _handle_message(message):
         await asyncio.sleep(10)
         await msg.delete()
         return
- 
+
     # ?mod - 現在の設定確認（10秒で消える）
     if message.content == "?mod":
         cfg = get_user_settings(message.author.id)
@@ -1386,11 +1431,11 @@ async def _handle_message(message):
         await asyncio.sleep(10)
         await msg.delete()
         return
- 
+
     # ?nan - コードを難読化してファイルで返す
     if message.content.startswith("?nan"):
         lua_code = ""
- 
+
         # ファイル添付がある場合はそちらを優先
         if message.attachments:
             att = message.attachments[0]
@@ -1405,11 +1450,11 @@ async def _handle_message(message):
             pattern = r"```(?:\w+)?\n(.*?)```"
             code_match = re.search(pattern, raw, re.DOTALL)
             lua_code = code_match.group(1).strip() if code_match else raw
- 
+
         if not lua_code:
             await message.reply("使い方: `?nan コード` または `?nan` にファイルを添付してください。")
             return
- 
+
         status_msg = await message.reply("🔒 難読化中...")
         try:
             async with aiohttp.ClientSession() as session:
@@ -1436,17 +1481,17 @@ async def _handle_message(message):
         except Exception as e:
             await status_msg.edit(content=f"⚠️ エラー: `{e}`")
         return
- 
+
     is_new = message.content.startswith("?ai ")
     is_cont = message.content.startswith("?a ")
     is_code_only = message.content.startswith("?aii ")
     if not is_new and not is_cont and not is_code_only:
         return
- 
+
     if not can_use_bot(message):
         await message.reply("⚠️ あなたのロールはBOTを使用できません。")
         return
- 
+
     if is_code_only:
         query = message.content[5:].strip()
         query = f"以下の内容のコードだけを作成してください。説明や解説は不要です。コードのみ返してください。\n\n{query}"
@@ -1466,36 +1511,36 @@ async def _handle_message(message):
         except Exception as e:
             await reply_msg.edit(content=f"⚠️ エラー: {e}")
         return
- 
+
     query = message.content[4:].strip() if is_new else message.content[3:].strip()
- 
+
     # 最初に「考え中...」を送信してからストリーミング更新
     reply_msg = await message.reply("🤖 考え中...")
- 
+
     try:
         answer = await ask_gemini_stream(message.channel.id, query, reply_msg, new_conversation=is_new, user_id=message.author.id)
- 
+
         code, ext = extract_code(answer)
         text = remove_code_blocks(answer) if code else answer
         if len(text) > 1900:
             text = text[:1900] + "..."
- 
+
         prefix = "🤖" if is_new else "🔁"
- 
+
         if code:
             file = discord.File(io.BytesIO(code.encode("utf-8")), filename=f"code.{ext}")
             await reply_msg.edit(content=f"{prefix} {text}")
             await message.channel.send(file=file)
         else:
             await reply_msg.edit(content=f"{prefix} {text}")
- 
+
     except Exception as e:
         await reply_msg.edit(content=f"⚠️ エラー: {e}")
 
 # ============================================================
 # ↓ここを書き換えるだけでOK！
-DISCORD_TOKEN = os.environ.get("DISCORD_TOKEN")
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+DISCORD_TOKEN = "ここにDiscordのトークン"
+GEMINI_API_KEY = "ここにGeminiのAPIキー"
 # ============================================================
 
 client.run(DISCORD_TOKEN)

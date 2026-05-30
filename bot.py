@@ -1034,21 +1034,19 @@ async def bypass_url(interaction: discord.Interaction, url: str):
     await interaction.response.defer()
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.post(
-                "https://api.bypass.tools/api/v1/bypass/direct",
-                json={"url": url, "refresh": False},
-                headers={"x-api-key": os.environ.get("BYPASS_API_KEY", "")},
-                timeout=aiohttp.ClientTimeout(total=60)
+            async with session.get(
+                "https://bypass.vip/api",
+                params={"url": url},
+                timeout=aiohttp.ClientTimeout(total=30)
             ) as resp:
                 data = await resp.json()
-                if data.get("status") == "success":
-                    result_url = data.get("result")
-                    await interaction.followup.send("✅ Bypass成功！\n" + result_url)
+                result = data.get("destination") or data.get("result") or data.get("url")
+                if result:
+                    await interaction.followup.send("✅ Bypass成功！\n" + result)
                 else:
-                    msg = data.get("message", "不明なエラー")
-                    await interaction.followup.send(f"⚠️ Bypass失敗: {msg}")
+                    await interaction.followup.send("⚠️ Bypass失敗: " + str(data))
     except Exception as e:
-        await interaction.followup.send(f"⚠️ エラー: {e}")
+        await interaction.followup.send("⚠️ エラー: " + str(e))
 
 # ==================== プレフィックスコマンド ====================
 

@@ -988,6 +988,46 @@ async def kjn_error(interaction: discord.Interaction, error):
     if isinstance(error, app_commands.MissingPermissions):
         await interaction.response.send_message("⚠️ このコマンドは管理者のみ使えます。", ephemeral=True)
 
+@tree.command(name="sn", description="メンバー参加通知チャンネルを設定します（管理者のみ）")
+@app_commands.describe(チャンネル="通知を送るチャンネル", メッセージ="通知メッセージ（{user}で名前に置換）")
+@app_commands.checks.has_permissions(administrator=True)
+async def set_join_notify(interaction: discord.Interaction, チャンネル: discord.TextChannel, メッセージ: str = "{user}が来たぞ！"):
+    settings = load_settings()
+    guild_id = str(interaction.guild.id)
+    if "notify" not in settings:
+        settings["notify"] = {}
+    if guild_id not in settings["notify"]:
+        settings["notify"][guild_id] = {}
+    settings["notify"][guild_id]["join_channel"] = str(チャンネル.id)
+    settings["notify"][guild_id]["join_msg"] = メッセージ
+    save_settings(settings)
+    await interaction.response.send_message("✅ 参加通知を " + チャンネル.mention + " に設定しました。\nメッセージ: `" + メッセージ + "`", ephemeral=True)
+
+@set_join_notify.error
+async def sn_error(interaction: discord.Interaction, error):
+    if isinstance(error, app_commands.MissingPermissions):
+        await interaction.response.send_message("⚠️ このコマンドは管理者のみ使えます。", ephemeral=True)
+
+@tree.command(name="ts", description="メンバー退出通知チャンネルを設定します（管理者のみ）")
+@app_commands.describe(チャンネル="通知を送るチャンネル", メッセージ="通知メッセージ（{user}で名前に置換）")
+@app_commands.checks.has_permissions(administrator=True)
+async def set_leave_notify(interaction: discord.Interaction, チャンネル: discord.TextChannel, メッセージ: str = "{user}が退出しました！"):
+    settings = load_settings()
+    guild_id = str(interaction.guild.id)
+    if "notify" not in settings:
+        settings["notify"] = {}
+    if guild_id not in settings["notify"]:
+        settings["notify"][guild_id] = {}
+    settings["notify"][guild_id]["leave_channel"] = str(チャンネル.id)
+    settings["notify"][guild_id]["leave_msg"] = メッセージ
+    save_settings(settings)
+    await interaction.response.send_message("✅ 退出通知を " + チャンネル.mention + " に設定しました。\nメッセージ: `" + メッセージ + "`", ephemeral=True)
+
+@set_leave_notify.error
+async def ts_error(interaction: discord.Interaction, error):
+    if isinstance(error, app_commands.MissingPermissions):
+        await interaction.response.send_message("⚠️ このコマンドは管理者のみ使えます。", ephemeral=True)
+
 # ==================== プレフィックスコマンド ====================
 
 @client.event
@@ -1010,6 +1050,30 @@ async def on_ready():
     for gid in settings.get("autoreply_guilds", []):
         autoreply_guilds.add(int(gid))
     print(f"✅ 起動しました: {client.user}")
+
+@client.event
+async def on_member_join(member: discord.Member):
+    settings = load_settings()
+    guild_id = str(member.guild.id)
+    notify = settings.get("notify", {}).get(guild_id, {})
+    ch_id = notify.get("join_channel")
+    msg = notify.get("join_msg", "{user}が来たぞ！")
+    if ch_id:
+        ch = member.guild.get_channel(int(ch_id))
+        if ch:
+            await ch.send(msg.replace("{user}", member.mention))
+
+@client.event
+async def on_member_remove(member: discord.Member):
+    settings = load_settings()
+    guild_id = str(member.guild.id)
+    notify = settings.get("notify", {}).get(guild_id, {})
+    ch_id = notify.get("leave_channel")
+    msg = notify.get("leave_msg", "{user}が退出しました！")
+    if ch_id:
+        ch = member.guild.get_channel(int(ch_id))
+        if ch:
+            await ch.send(msg.replace("{user}", member.mention))
 
 @client.event
 async def on_message(message):

@@ -1028,6 +1028,28 @@ async def ts_error(interaction: discord.Interaction, error):
     if isinstance(error, app_commands.MissingPermissions):
         await interaction.response.send_message("⚠️ このコマンドは管理者のみ使えます。", ephemeral=True)
 
+@tree.command(name="by", description="URLをbypassします")
+@app_commands.describe(url="bypassするURL")
+async def bypass_url(interaction: discord.Interaction, url: str):
+    await interaction.response.defer()
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                "https://api.bypass.tools/api/v1/bypass/direct",
+                json={"url": url, "refresh": False},
+                headers={"x-api-key": os.environ.get("BYPASS_API_KEY", "")},
+                timeout=aiohttp.ClientTimeout(total=60)
+            ) as resp:
+                data = await resp.json()
+                if data.get("status") == "success":
+                    result_url = data.get("result")
+                    await interaction.followup.send("✅ Bypass成功！\n" + result_url)
+                else:
+                    msg = data.get("message", "不明なエラー")
+                    await interaction.followup.send(f"⚠️ Bypass失敗: {msg}")
+    except Exception as e:
+        await interaction.followup.send(f"⚠️ エラー: {e}")
+
 # ==================== プレフィックスコマンド ====================
 
 @client.event

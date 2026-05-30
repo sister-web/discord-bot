@@ -1032,21 +1032,49 @@ async def ts_error(interaction: discord.Interaction, error):
 @app_commands.describe(url="bypassするURL")
 async def bypass_url(interaction: discord.Interaction, url: str):
     await interaction.response.defer()
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(
-                "https://bypass.vip/api",
-                params={"url": url},
-                timeout=aiohttp.ClientTimeout(total=30)
-            ) as resp:
-                data = await resp.json()
-                result = data.get("destination") or data.get("result") or data.get("url")
-                if result:
-                    await interaction.followup.send("✅ Bypass成功！\n" + result)
-                else:
-                    await interaction.followup.send("⚠️ Bypass失敗: " + str(data))
-    except Exception as e:
-        await interaction.followup.send("⚠️ エラー: " + str(e))
+    import urllib.parse, json as _json
+    encoded = urllib.parse.quote(url, safe="")
+
+    # 試すAPIリスト（順番に試して成功したら送信）
+    async def try_get(session, api_url):
+        async with session.get(api_url, timeout=aiohttp.ClientTimeout(total=20)) as resp:
+            text = await resp.text()
+            try:
+                data = _json.loads(text)
+            except Exception:
+                return None
+            return data.get("destination") or data.get("result") or data.get("url") or data.get("bypassed") or data.get("link")
+
+    async def try_post(session, api_url, payload, headers=None):
+        async with session.post(api_url, json=payload, headers=headers or {}, timeout=aiohttp.ClientTimeout(total=20)) as resp:
+            text = await resp.text()
+            try:
+                data = _json.loads(text)
+            except Exception:
+                return None
+            return data.get("destination") or data.get("result") or data.get("url") or data.get("bypassed") or data.get("link") or data.get("bypassed_url")
+
+
+    async with aiohttp.ClientSession() as session:
+        # 1. bypass.vip
+        try:
+            r = await try_get(session, "https://api.bypass.vip/bypass?url=" + encoded)
+            if r:
+                await interaction.followup.send("✅ Bypass成功！\n" + r)
+                return
+        except Exception:
+            pass
+
+        # 2. dlr.kys.gay
+        try:
+            r = await try_get(session, "https://dlr.kys.gay/api/free/bypass?url=" + encoded)
+            if r:
+                await interaction.followup.send("✅ Bypass成功！\n" + r)
+                return
+        except Exception:
+            pass
+
+    await interaction.followup.send("⚠️ Bypass失敗しました。このURLは対応していない可能性があります。")
 
 # ==================== プレフィックスコマンド ====================
 

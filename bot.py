@@ -1539,8 +1539,8 @@ async def _handle_message(message):
 
 # ============================================================
 # ↓ここを書き換えるだけでOK！
-DISCORD_TOKEN = "ここにDiscordのトークン"
-GEMINI_API_KEY = "ここにGeminiのAPIキー"
+DISCORD_TOKEN = os.environ.get("DISCORD_TOKEN")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 # ============================================================
 
 client.run(DISCORD_TOKEN)

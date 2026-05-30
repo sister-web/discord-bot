@@ -1231,7 +1231,7 @@ async def _handle_message(message):
         return
 
     # ?ban @ユーザー - BANコマンド
-    if message.content.startswith("?ban ") and message.mentions:
+    if message.content.startswith("?b ") and message.mentions:
         if not message.author.guild_permissions.ban_members:
             await message.reply("⚠️ BAN権限がありません。")
             return
@@ -1244,7 +1244,7 @@ async def _handle_message(message):
         return
 
     # ?to @ユーザー 時間 - タイムアウト（最大28日）
-    if message.content.startswith("?to ") and message.mentions:
+    if message.content.startswith("?t ") and message.mentions:
         if not message.author.guild_permissions.moderate_members:
             await message.reply("⚠️ タイムアウト権限がありません。")
             return

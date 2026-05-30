@@ -1056,23 +1056,25 @@ async def bypass_url(interaction: discord.Interaction, url: str):
 
 
     async with aiohttp.ClientSession() as session:
-        # 1. bypass.vip
+        # dlr.kys.gay
         try:
-            r = await try_get(session, "https://api.bypass.vip/bypass?url=" + encoded)
-            if r:
+            r = await try_get(session, "https://dlr.kys.gay/api/free/bypass?url=" + encoded)
+            if r and "discord" not in r and "SHUT DOWN" not in r:
                 await interaction.followup.send("✅ Bypass成功！\n" + r)
                 return
         except Exception:
             pass
 
-        # 2. dlr.kys.gay
-        try:
-            r = await try_get(session, "https://dlr.kys.gay/api/free/bypass?url=" + encoded)
-            if r:
-                await interaction.followup.send("✅ Bypass成功！\n" + r)
-                return
-        except Exception:
-            pass
+        # bypass.tools API
+        bypass_key = os.environ.get("BYPASS_API_KEY", "")
+        if bypass_key:
+            try:
+                r = await try_post(session, "https://api.bypass.tools/api/v1/bypass/direct", {"url": url}, {"x-api-key": bypass_key})
+                if r and "discord" not in r and "SHUT DOWN" not in r:
+                    await interaction.followup.send("✅ Bypass成功！\n" + r)
+                    return
+            except Exception:
+                pass
 
     await interaction.followup.send("⚠️ Bypass失敗しました。このURLは対応していない可能性があります。")
 

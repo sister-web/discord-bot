@@ -305,12 +305,14 @@ class NisePanelView(discord.ui.View):
         self.add_item(NisePanelButton(button_label, message))
 
 class NisePanelButton(discord.ui.Button):
-    def __init__(self, label: str, message: str):
-        super().__init__(label=label, style=discord.ButtonStyle.success, custom_id="nise_panel_btn_" + label[:10])
-        self.message = message
+    def __init__(self, label: str = "受け取る", message: str = "受け取りました！"):
+        super().__init__(label=label, style=discord.ButtonStyle.success, custom_id="nise_panel_btn_main")
+        self.msg = message
 
     async def callback(self, interaction: discord.Interaction):
-        await interaction.response.send_message(self.message, ephemeral=True)
+        settings = load_settings()
+        msg = settings.get("nise_messages", {}).get(str(interaction.guild.id), self.msg)
+        await interaction.response.send_message(msg, ephemeral=True)
 
 # ==================== カジノ ====================
 
@@ -1107,12 +1109,86 @@ async def bypass_url(interaction: discord.Interaction, url: str):
     メッセージ="ボタンを押した人にだけ表示するメッセージ"
 )
 async def nise_panel(interaction: discord.Interaction, 名前: str, 詳細: str, ボタン名: str, メッセージ: str):
+    settings = load_settings()
+    if "nise_messages" not in settings:
+        settings["nise_messages"] = {}
+    settings["nise_messages"][str(interaction.guild.id)] = メッセージ
+    save_settings(settings)
     embed = discord.Embed(title=名前, description=詳細, color=discord.Color.green())
     view = NisePanelView(ボタン名, メッセージ)
     await interaction.channel.send(embed=embed, view=view)
     await interaction.response.send_message("✅ パネルを作成しました。", ephemeral=True)
 
+@tree.command(name="jisin", description="地震速報を送るチャンネルを設定します（管理者のみ）")
+@app_commands.describe(チャンネル="通知を送るチャンネル")
+@app_commands.checks.has_permissions(administrator=True)
+async def set_jisin(interaction: discord.Interaction, チャンネル: discord.TextChannel):
+    settings = load_settings()
+    guild_id = str(interaction.guild.id)
+    if "jisin" not in settings:
+        settings["jisin"] = {}
+    settings["jisin"][guild_id] = str(チャンネル.id)
+    save_settings(settings)
+    await interaction.response.send_message(f"✅ 地震速報を {チャンネル.mention} に設定しました。", ephemeral=True)
+
+@set_jisin.error
+async def jisin_error(interaction: discord.Interaction, error):
+    if isinstance(error, app_commands.MissingPermissions):
+        await interaction.response.send_message("⚠️ このコマンドは管理者のみ使えます。", ephemeral=True)
+
 # ==================== プレフィックスコマンド ====================
+
+# 地震速報の最後のIDを記録
+_last_jisin_id = set()
+
+async def jisin_task():
+    global _last_jisin_id
+    await client.wait_until_ready()
+    while not client.is_closed():
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get("https://weathernews.jp/quake/", timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                    html = await resp.text()
+            import re as _re
+            # 地震情報を抽出
+            matches = _re.findall(r'<div class="quakeListItem[^"]*"[^>]*>(.*?)</div>', html, _re.DOTALL)
+            if not matches:
+                # 別のパターンで試す
+                matches = _re.findall(r'M[\d\.]+.*?震度[\d強弱]+', html)
+
+            settings = load_settings()
+            for guild_id, ch_id in settings.get("jisin", {}).items():
+                guild = client.get_guild(int(guild_id))
+                if not guild:
+                    continue
+                ch = guild.get_channel(int(ch_id))
+                if not ch:
+                    continue
+                # 最新の地震情報を取得
+                mag = _re.search(r'マグニチュード.*?([\d\.]+)', html)
+                depth = _re.search(r'深さ.*?(\d+)km', html)
+                shindo = _re.search(r'最大震度.*?([\d強弱]+)', html)
+                place = _re.search(r'震源地.*?([^\s<]+)', html)
+
+                if mag and shindo:
+                    info_id = (mag.group(1) if mag else "") + (shindo.group(1) if shindo else "")
+                    if info_id and info_id not in _last_jisin_id:
+                        _last_jisin_id.add(info_id)
+                        if len(_last_jisin_id) > 50:
+                            _last_jisin_id = set(list(_last_jisin_id)[-50:])
+                        msg = "\U0001f6a8 **地震速報**\n"
+                        msg = "\U0001f6a8 **\u5730\u9707\u901f\u5831**\n"
+                        if place:
+                            msg += "\u9707\u6e90\u5730: " + place.group(1) + "\n"
+                        if mag:
+                            msg += "M" + mag.group(1) + "\n"
+                        if shindo:
+                            msg += "\u6700\u5927\u9707\u5ea6: " + shindo.group(1) + "\n"
+                        if depth:
+                            msg += "\u6df1\u3055: " + depth.group(1) + "km"
+        except Exception:
+            pass
+        await asyncio.sleep(60)  # 1分ごとにチェック
 
 @client.event
 async def on_ready():
@@ -1135,6 +1211,7 @@ async def on_ready():
     for gid in settings.get("autoreply_guilds", []):
         autoreply_guilds.add(int(gid))
     print(f"✅ 起動しました: {client.user}")
+    client.loop.create_task(jisin_task())
 
 @client.event
 async def on_member_join(member: discord.Member):

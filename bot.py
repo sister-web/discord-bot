@@ -25,13 +25,19 @@ def get_ai_client():
     if _ai_client is None:
         _ai_client = genai.Client(api_key=GEMINI_API_KEY)
     return _ai_client
-SETTINGS_FILE = "/data/settings.json" if os.path.exists("/data") else os.path.join(os.path.dirname(os.path.abspath(__file__)), "settings.json")
+def get_settings_file():
+    if os.path.isdir("/data") and os.access("/data", os.W_OK):
+        return "/data/settings.json"
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "settings.json")
+
+SETTINGS_FILE = get_settings_file()
 _settings_cache = None
 
 def load_settings():
-    global _settings_cache
+    global _settings_cache, SETTINGS_FILE
     if _settings_cache is not None:
         return _settings_cache
+    SETTINGS_FILE = get_settings_file()
     if os.path.exists(SETTINGS_FILE):
         with open(SETTINGS_FILE, "r") as f:
             _settings_cache = json.load(f)

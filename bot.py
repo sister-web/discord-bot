@@ -295,6 +295,23 @@ async def yak_error(interaction: discord.Interaction, error):
 
 
 
+# ==================== 偽パネル ====================
+
+class NisePanelView(discord.ui.View):
+    def __init__(self, button_label: str = "受け取る", message: str = "受け取りました！"):
+        super().__init__(timeout=None)
+        self.button_label = button_label
+        self.message = message
+        self.add_item(NisePanelButton(button_label, message))
+
+class NisePanelButton(discord.ui.Button):
+    def __init__(self, label: str, message: str):
+        super().__init__(label=label, style=discord.ButtonStyle.success, custom_id="nise_panel_btn_" + label[:10])
+        self.message = message
+
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.send_message(self.message, ephemeral=True)
+
 # ==================== カジノ ====================
 
 import random as _casino_random
@@ -1082,12 +1099,26 @@ async def bypass_url(interaction: discord.Interaction, url: str):
 
     await interaction.followup.send("⚠️ Bypass失敗しました。このURLは対応していない可能性があります。")
 
+@tree.command(name="nisepanel", description="偽物のパネルを作成します")
+@app_commands.describe(
+    名前="貰えるものの名前",
+    詳細="貰えるものの詳細",
+    ボタン名="ボタンの名前",
+    メッセージ="ボタンを押した人にだけ表示するメッセージ"
+)
+async def nise_panel(interaction: discord.Interaction, 名前: str, 詳細: str, ボタン名: str, メッセージ: str):
+    embed = discord.Embed(title=名前, description=詳細, color=discord.Color.green())
+    view = NisePanelView(ボタン名, メッセージ)
+    await interaction.channel.send(embed=embed, view=view)
+    await interaction.response.send_message("✅ パネルを作成しました。", ephemeral=True)
+
 # ==================== プレフィックスコマンド ====================
 
 @client.event
 async def on_ready():
     # 永続ビューを登録（再起動後もボタンが機能する）
     client.add_view(CasinoPanelView())
+    client.add_view(NisePanelView())
     client.add_view(BetButtonView())
     # 古いcustom_idのビューも登録（後方互換）
     client.add_view(TicketCreateButton())

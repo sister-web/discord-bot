@@ -1475,61 +1475,48 @@ async def _handle_message(message):
                     en_words = [w for w in re.findall(r"[a-zA-Z]+", message.content) if len(w) >= 2]
                     is_english = jp_chars == 0 and len(en_words) >= 1
 
-                    script_keywords_jp = ["スクリプト", "無料", "タダ", "ください", "買いたい", "欲しい", "いくら", "値段", "売って", "購入したい"]
-                    script_keywords_en = ["script", "free", "give me", "gimme", "buy", "purchase", "price", "how much", "cost"]
-                    wants_script_jp = not is_english and any(kw in msg_lower for kw in script_keywords_jp)
-                    wants_script_en = is_english and any(kw in msg_lower for kw in script_keywords_en)
-
-                    if wants_script_jp:
-                        await message.reply("スクリプトは有料です。購入希望の方はチケットを作成してください！🎫")
-                    elif wants_script_en:
-                        await message.reply("The script is paid. Please create a ticket to purchase! 🎫")
+                    if is_english:
+                        if yak_style:
+                            sys_prompt = f"you're a real person on discord, {yak_style} personality. text like a normal human - casual, no punctuation at end, typos ok, short replies for short messages. never ask multiple questions. don't sound like AI."
+                        else:
+                            sys_prompt = "you're a real person on discord. text like a normal human - casual, no punctuation at end, typos ok, short replies for short messages. never ask multiple questions. don't sound like AI."
                     else:
-                        if is_english:
-                            if yak_style:
-                                sys_prompt = f"you're a real person on discord, {yak_style} personality. text like a normal human - casual, no punctuation at end, typos ok, short replies for short messages. never ask multiple questions. don't sound like AI."
-                            else:
-                                sys_prompt = "you're a real person on discord. text like a normal human - casual, no punctuation at end, typos ok, short replies for short messages. never ask multiple questions. don't sound like AI."
+                        if yak_style:
+                            sys_prompt = f"discordでチャットしてる普通の人間。{yak_style}なキャラ。改行絶対しない。句読点なし。ため口。質問は1つまで。AIっぽさ禁止。"
                         else:
-                            if yak_style:
-                                sys_prompt = f"discordでチャットしてる普通の人間。{yak_style}なキャラ。一言返しも多用する。長くなりすぎない。語尾に句読点つけない。改行少なめ。質問は1つまで。AIっぽさ禁止。"
-                            else:
-                                sys_prompt = "discordでチャットしてる高校生。改行絶対しない。句読点なし。ため口。感情は言葉でなくwやwwや笑で表す。質問は絶対1つまで。AIっぽさ禁止。箇条書き禁止。"
-                        cfg.system_instruction = sys_prompt
-                        cfg.max_output_tokens = 500
+                            sys_prompt = "discordでチャットしてる高校生。改行絶対しない。句読点なし。ため口。wやwwや笑で感情表現。質問は1つまで。AIっぽさ禁止。"
+                    cfg.system_instruction = sys_prompt
+                    cfg.max_output_tokens = 200
 
-                        # 画像が添付されている場合
-                        if message.attachments and message.attachments[0].content_type and message.attachments[0].content_type.startswith("image/"):
-                            img_url = message.attachments[0].url
-                            async with aiohttp.ClientSession() as session:
-                                async with session.get(img_url) as resp:
-                                    img_bytes = await resp.read()
-                                    import base64
-                                    img_b64 = base64.b64encode(img_bytes).decode()
-                                    ct = message.attachments[0].content_type
-                            contents = [{"role": "user", "parts": [
-                                {"inline_data": {"mime_type": ct, "data": img_b64}},
-                                {"text": message.content or "この画像について一言"}
-                            ]}]
-                        else:
-                            contents = [{"role": "user", "parts": [{"text": message.content or "…"}]}]
-
-                        # 会話履歴を取得
-                        hist = autoreply_histories.get(message.author.id, [])
-                        full_contents = hist + contents if hist else contents
-                        for _retry in range(3):
-                            try:
-                                response = await ai.aio.models.generate_content(
-                                    model="gemini-3.1-flash-lite",
-                                    contents=full_contents,
-                                    config=cfg
-                                )
-                                break
-                            except Exception as _e:
-                                if ("503" in str(_e) or "unavailable" in str(_e).lower()) and _retry < 2:
-                                    await asyncio.sleep(2)
-                                    continue
-                                raise
+                    # 画像が添付されている場合
+                    # 画像が添付されている場合
+                    if message.attachments and message.attachments[0].content_type and message.attachments[0].content_type.startswith("image/"):
+                        img_url = message.attachments[0].url
+                        async with aiohttp.ClientSession() as _sess:
+                            async with _sess.get(img_url) as _resp:
+                                img_bytes = await _resp.read()
+                                import base64
+                                img_b64 = base64.b64encode(img_bytes).decode()
+                                ct = message.attachments[0].content_type
+                        contents = [{"role": "user", "parts": [{"inline_data": {"mime_type": ct, "data": img_b64}}, {"text": message.content or "この画像について一言"}]}]
+                    else:
+                        contents = [{"role": "user", "parts": [{"text": message.content or "…"}]}]
+                    # 会話履歴を取得
+                    hist = autoreply_histories.get(message.author.id, [])
+                    full_contents = hist + contents if hist else contents
+                    for _retry in range(3):
+                        try:
+                            response = await ai.aio.models.generate_content(
+                                model="gemini-3.1-flash-lite",
+                                contents=full_contents,
+                                config=cfg
+                            )
+                            break
+                        except Exception as _e:
+                            if ("503" in str(_e) or "unavailable" in str(_e).lower()) and _retry < 2:
+                                await asyncio.sleep(2)
+                                continue
+                            raise
                         if response.text:
                             import re as _re
                             # 思考テキスト（空白や制御文字）を除去

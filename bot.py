@@ -1056,25 +1056,29 @@ async def bypass_url(interaction: discord.Interaction, url: str):
 
 
     async with aiohttp.ClientSession() as session:
-        # dlr.kys.gay
-        try:
-            r = await try_get(session, "https://dlr.kys.gay/api/free/bypass?url=" + encoded)
-            if r and "discord" not in r and "SHUT DOWN" not in r:
-                await interaction.followup.send("✅ Bypass成功！\n" + r)
-                return
-        except Exception:
-            pass
+        def valid(r):
+            return r and "discord" not in r.lower() and "shut down" not in r.lower() and r.startswith("http")
 
-        # bypass.tools API
+        endpoints = [
+            ("GET", "https://dlr.kys.gay/api/free/bypass?url=" + encoded, None, None),
+            ("GET", "https://bypass.bot.nu/api/bypass?url=" + encoded, None, None),
+            ("GET", "https://api.bypass.city/bypass?url=" + encoded, None, None),
+        ]
         bypass_key = os.environ.get("BYPASS_API_KEY", "")
         if bypass_key:
+            endpoints.append(("POST", "https://api.bypass.tools/api/v1/bypass/direct", {"url": url}, {"x-api-key": bypass_key}))
+
+        for method, ep, payload, headers in endpoints:
             try:
-                r = await try_post(session, "https://api.bypass.tools/api/v1/bypass/direct", {"url": url}, {"x-api-key": bypass_key})
-                if r and "discord" not in r and "SHUT DOWN" not in r:
+                if method == "GET":
+                    r = await try_get(session, ep)
+                else:
+                    r = await try_post(session, ep, payload, headers)
+                if valid(r):
                     await interaction.followup.send("✅ Bypass成功！\n" + r)
                     return
             except Exception:
-                pass
+                continue
 
     await interaction.followup.send("⚠️ Bypass失敗しました。このURLは対応していない可能性があります。")
 
@@ -1410,7 +1414,7 @@ async def _handle_message(message):
                 if has_nani_kw and not impersonate_target and not is_bot_mention and not is_reply_to_bot:
                     return
 
-                ai_model = "gemini-3.5-flash"
+                ai_model = "gemini-2.0-flash-lite"
                 cfg = types.GenerateContentConfig(
                     max_output_tokens=120
                 )
@@ -1420,7 +1424,7 @@ async def _handle_message(message):
                     cfg.system_instruction = system
                     cfg.max_output_tokens = 60
                     response = await ai.aio.models.generate_content(
-                        model="gemini-3.1-flash-lite",
+                        model="gemini-2.0-flash-lite",
                         contents=[{"role": "user", "parts": [{"text": message.content}]}],
                         config=cfg
                     )
@@ -1440,7 +1444,7 @@ async def _handle_message(message):
                     en_words = [w for w in re.findall(r"[a-zA-Z]+", message.content) if len(w) >= 2]
                     is_english = jp_chars == 0 and len(en_words) >= 1
 
-                    script_keywords_jp = ["スクリプト", "無料", "タダ", "ください", "買いたい", "欲しい", "いくら", "値段", "お金", "売って", "購入"]
+                    script_keywords_jp = ["スクリプト", "無料", "タダ", "ください", "買いたい", "欲しい", "いくら", "値段", "売って", "購入したい"]
                     script_keywords_en = ["script", "free", "give me", "gimme", "buy", "purchase", "price", "how much", "cost"]
                     wants_script_jp = not is_english and any(kw in msg_lower for kw in script_keywords_jp)
                     wants_script_en = is_english and any(kw in msg_lower for kw in script_keywords_en)
@@ -1459,7 +1463,7 @@ async def _handle_message(message):
                             if yak_style:
                                 sys_prompt = f"discordでチャットしてる普通の人間。{yak_style}なキャラ。一言返しも多用する。長くなりすぎない。語尾に句読点つけない。改行少なめ。質問は1つまで。AIっぽさ禁止。"
                             else:
-                                sys_prompt = "discordでチャットしてる普通の人間。一言返しも多用する。たまに長く返すこともある。語尾に句読点つけない。改行少なめ。質問は1つまで。AIっぽさ禁止。"
+                                sys_prompt = "discordでチャットしてる高校生。改行絶対しない。句読点なし。ため口。感情は言葉でなくwやwwや笑で表す。質問は絶対1つまで。AIっぽさ禁止。箇条書き禁止。"
                         cfg.system_instruction = sys_prompt
                         cfg.max_output_tokens = 500
 
@@ -1485,7 +1489,7 @@ async def _handle_message(message):
                         for _retry in range(3):
                             try:
                                 response = await ai.aio.models.generate_content(
-                                    model="gemini-3.1-flash-lite",
+                                    model="gemini-2.0-flash-lite",
                                     contents=full_contents,
                                     config=cfg
                                 )

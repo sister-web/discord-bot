@@ -1393,10 +1393,21 @@ async def _handle_message(message):
         # 人間へのメンションや人間への返信は無視
         has_human_mention = message.mentions and any(not m.bot for m in message.mentions)
         ref = message.reference
-        is_reply_to_human = (ref and ref.resolved and hasattr(ref.resolved, "author") and not ref.resolved.author.bot)
-        # botへのメンション・botへの返信も反応させる
+        is_reply_to_human = False
+        is_reply_to_bot = False
         is_bot_mention = message.mentions and all(m.bot for m in message.mentions)
-        is_reply_to_bot = (ref and ref.resolved and hasattr(ref.resolved, "author") and ref.resolved.author.bot)
+        if ref:
+            ref_msg = ref.resolved
+            if ref_msg is None:
+                try:
+                    ref_msg = await message.channel.fetch_message(ref.message_id)
+                except Exception:
+                    ref_msg = None
+            if ref_msg and hasattr(ref_msg, "author"):
+                if ref_msg.author.bot:
+                    is_reply_to_bot = True
+                else:
+                    is_reply_to_human = True
         if has_human_mention or is_reply_to_human:
             return
         if True:

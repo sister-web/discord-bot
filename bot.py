@@ -1414,7 +1414,7 @@ async def _handle_message(message):
                 if has_nani_kw and not impersonate_target and not is_bot_mention and not is_reply_to_bot:
                     return
 
-                ai_model = "gemini-2.0-flash-lite"
+                ai_model = "gemini-1.5-flash"
                 cfg = types.GenerateContentConfig(
                     max_output_tokens=120
                 )
@@ -1424,7 +1424,7 @@ async def _handle_message(message):
                     cfg.system_instruction = system
                     cfg.max_output_tokens = 60
                     response = await ai.aio.models.generate_content(
-                        model="gemini-2.0-flash-lite",
+                        model="gemini-1.5-flash",
                         contents=[{"role": "user", "parts": [{"text": message.content}]}],
                         config=cfg
                     )
@@ -1489,7 +1489,7 @@ async def _handle_message(message):
                         for _retry in range(3):
                             try:
                                 response = await ai.aio.models.generate_content(
-                                    model="gemini-2.0-flash-lite",
+                                    model="gemini-1.5-flash",
                                     contents=full_contents,
                                     config=cfg
                                 )

@@ -351,9 +351,9 @@ async def _update_giveaway_message(message, gw, guild):
         color=discord.Color.blurple()
     )
     embed.add_field(name="Ends", value=f"{discord_ts} ({discord_ts_full})", inline=False)
-    embed.add_field(name="Hosted by", value=host_mention, inline=True)
-    embed.add_field(name="Entries", value=str(entries), inline=True)
-    embed.add_field(name="Winners", value=str(gw["winners"]), inline=True)
+    embed.add_field(name="Hosted by:", value=host_mention, inline=True)
+    embed.add_field(name="Entries:", value=str(entries), inline=True)
+    embed.add_field(name="Winners:", value=str(gw["winners"]), inline=True)
 
     try:
         await message.edit(embed=embed)
@@ -383,9 +383,9 @@ async def _end_giveaway(guild, channel_id, msg_id, gw, settings):
     )
     embed.add_field(name="終了時刻", value=f"<t:{int(gw['end_time'])}:f>", inline=False)
     host = guild.get_member(int(gw["host_id"]))
-    embed.add_field(name="Hosted by", value=host.mention if host else f"<@{gw['host_id']}>", inline=True)
-    embed.add_field(name="Entries", value=str(len(entries)), inline=True)
-    embed.add_field(name="Winners", value=str(gw["winners"]), inline=True)
+    embed.add_field(name="Hosted by:", value=host.mention if host else f"<@{gw['host_id']}>", inline=True)
+    embed.add_field(name="Entries:", value=str(len(entries)), inline=True)
+    embed.add_field(name="Winners:", value=str(gw["winners"]), inline=True)
     embed.set_footer(text="🎊 ギブアウェイ終了")
 
     view = discord.ui.View()
@@ -495,9 +495,9 @@ class GiveawayModal(discord.ui.Modal, title="ギブアウェイを作成"):
             color=discord.Color.blurple()
         )
         embed.add_field(name="Ends", value=f"{discord_ts} ({discord_ts_full})", inline=False)
-        embed.add_field(name="Hosted by", value=host.mention, inline=True)
-        embed.add_field(name="Entries", value="0", inline=True)
-        embed.add_field(name="Winners", value=str(winner_count), inline=True)
+        embed.add_field(name="Hosted by:", value=host.mention, inline=True)
+        embed.add_field(name="Entries:", value="0", inline=True)
+        embed.add_field(name="Winners:", value=str(winner_count), inline=True)
 
         await interaction.response.send_message("✅ ギブアウェイを作成しました！", ephemeral=True)
         msg = await interaction.channel.send(embed=embed, view=GiveawayPanelView())
@@ -1577,21 +1577,21 @@ async def _handle_message(message):
         await message.reply(txt)
         return
 
-    # ?giv - ギブアウェイ当選者確認
+    # ?giv - 進行中ギブアウェイの参加者を表示
     if message.content.strip() == "?giv":
         settings = load_settings()
         guild_id = str(message.guild.id)
         giveaways = settings.get("giveaways", {}).get(guild_id, {})
-        ended = {k: v for k, v in giveaways.items() if v.get("ended")}
-        if not ended:
-            await message.reply("まだ終了したギブアウェイはありません。")
+        active = {k: v for k, v in giveaways.items() if not v.get("ended") and _time.time() < v.get("end_time", 0)}
+        if not active:
+            await message.reply("現在進行中のギブアウェイはありません。")
             return
         lines = []
-        for msg_id, gw in sorted(ended.items(), key=lambda x: -x[1].get("end_time", 0))[:5]:
-            winner_ids = gw.get("winner_ids", [])
-            winners_txt = " ".join(f"<@{w}>" for w in winner_ids) if winner_ids else "なし"
-            lines.append(f"**{gw['prize']}**: {winners_txt}")
-        await message.reply("🎊 **直近のギブアウェイ当選者**\n" + "\n".join(lines))
+        for msg_id, gw in active.items():
+            entries = gw.get("entries", [])
+            entry_mentions = " ".join(f"<@{uid}>" for uid in entries) if entries else "まだ誰も参加していません"
+            lines.append(f"**{gw['prize']}** ({len(entries)}人)\n{entry_mentions}")
+        await message.reply("🎉 **進行中のギブアウェイ参加者**\n\n" + "\n\n".join(lines))
         return
 
     # ?gif - ランダムプレゼント

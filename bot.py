@@ -7,6 +7,7 @@ import json
 import os
 import asyncio
 import aiohttp
+import time as _time
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -15,16 +16,17 @@ client = discord.Client(intents=intents)
 tree = app_commands.CommandTree(client)
 
 histories = {}
-autoreply_guilds = set()  # 自動返信が有効なギルドID（起動時にsettingsから復元）
-last_bets = {}  # ユーザーごとの最後の賭け金
-autoreply_histories = {}  # 自動返信の会話履歴（ユーザーIDごと）
-_ai_client = None  # Geminiクライアントをキャッシュ
+autoreply_guilds = set()
+last_bets = {}
+autoreply_histories = {}
+_ai_client = None
 
 def get_ai_client():
     global _ai_client
     if _ai_client is None:
         _ai_client = genai.Client(api_key=GEMINI_API_KEY)
     return _ai_client
+
 def get_settings_file():
     if os.path.isdir("/data") and os.access("/data", os.W_OK):
         return "/data/settings.json"
@@ -58,7 +60,7 @@ def can_use_bot(message):
         return False
     allowed = settings.get(guild_id, {}).get("allowed_roles", [])
     if not allowed:
-        return False  # ロール未設定なら誰も使えない
+        return False
     user_role_ids = [str(r.id) for r in message.author.roles]
     return any(r in user_role_ids for r in allowed)
 
@@ -119,7 +121,7 @@ async def ask_gemini_stream(channel_id, query, reply_msg, new_conversation=False
                             last_edit = now
                         except:
                             pass
-            break  # 成功したらループを抜ける
+            break
         except Exception as e:
             if "503" in str(e) or "unavailable" in str(e).lower():
                 await asyncio.sleep(3)
@@ -206,7 +208,7 @@ async def role_error(interaction: discord.Interaction, error):
 @app_commands.describe(ユーザー="DMを送る相手", メッセージ="送るメッセージ内容", 回数="送る回数（デフォルト1）")
 @app_commands.checks.has_permissions(administrator=True)
 async def send_dm(interaction: discord.Interaction, ユーザー: discord.Member, メッセージ: str, 回数: int = 1):
-    回数 = max(1, min(回数, 3000))  # 1〜100回に制限
+    回数 = max(1, min(回数, 3000))
     await interaction.response.send_message(f"📨 {ユーザー.mention} に{回数}回送信中...", ephemeral=True)
     try:
         sent = 0
@@ -217,7 +219,7 @@ async def send_dm(interaction: discord.Interaction, ユーザー: discord.Member
                 if 回数 > 1:
                     await asyncio.sleep(0.3)
             except discord.HTTPException as e:
-                if e.status == 429:  # レート制限
+                if e.status == 429:
                     await asyncio.sleep(1)
                     await ユーザー.send(メッセージ)
                     sent += 1
@@ -299,7 +301,229 @@ async def yak_error(interaction: discord.Interaction, error):
     if isinstance(error, app_commands.MissingPermissions):
         await interaction.response.send_message("⚠️ このコマンドは管理者のみ使えます。", ephemeral=True)
 
+# ==================== ギブアウェイ ====================
 
+class GiveawayPanelView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="🎉", style=discord.ButtonStyle.primary, custom_id="giveaway_enter")
+    async def enter(self, interaction: discord.Interaction, button: discord.ui.Button):
+        settings = load_settings()
+        guild_id = str(interaction.guild.id)
+        msg_id = str(interaction.message.id)
+        giveaways = settings.get("giveaways", {}).get(guild_id, {})
+        gw = giveaways.get(msg_id)
+
+        if not gw:
+            await interaction.response.send_message("⚠️ このギブアウェイは存在しません。", ephemeral=True)
+            return
+        if gw.get("ended"):
+            await interaction.response.send_message("⚠️ このギブアウェイはすでに終了しています。", ephemeral=True)
+            return
+        if _time.time() > gw["end_time"]:
+            await interaction.response.send_message("⚠️ このギブアウェイはすでに終了しています。", ephemeral=True)
+            return
+
+        uid = str(interaction.user.id)
+        if uid in gw.get("entries", []):
+            gw["entries"].remove(uid)
+            save_settings(settings)
+            await interaction.response.send_message("❌ 参加を取り消しました。", ephemeral=True)
+        else:
+            gw.setdefault("entries", []).append(uid)
+            save_settings(settings)
+            await interaction.response.send_message("✅ 参加しました！当選を待ってね🎉", ephemeral=True)
+
+        await _update_giveaway_message(interaction.message, gw, interaction.guild)
+
+
+async def _update_giveaway_message(message, gw, guild):
+    discord_ts = f"<t:{int(gw['end_time'])}:R>"
+    discord_ts_full = f"<t:{int(gw['end_time'])}:f>"
+    host = guild.get_member(int(gw["host_id"]))
+    host_mention = host.mention if host else f"<@{gw['host_id']}>"
+    entries = len(gw.get("entries", []))
+
+    embed = discord.Embed(
+        title=gw["prize"],
+        description=gw.get("description", ""),
+        color=discord.Color.blurple()
+    )
+    embed.add_field(name="Ends", value=f"{discord_ts} ({discord_ts_full})", inline=False)
+    embed.add_field(name="Hosted by", value=host_mention, inline=True)
+    embed.add_field(name="Entries", value=str(entries), inline=True)
+    embed.add_field(name="Winners", value=str(gw["winners"]), inline=True)
+
+    try:
+        await message.edit(embed=embed)
+    except Exception:
+        pass
+
+
+async def _end_giveaway(guild, channel_id, msg_id, gw, settings):
+    import random
+    guild_id = str(guild.id)
+    channel = guild.get_channel(int(channel_id))
+    if not channel:
+        return
+
+    try:
+        msg = await channel.fetch_message(int(msg_id))
+    except Exception:
+        return
+
+    entries = gw.get("entries", [])
+    winner_count = min(gw["winners"], len(entries))
+
+    embed = discord.Embed(
+        title=gw["prize"],
+        description=gw.get("description", ""),
+        color=discord.Color.red()
+    )
+    embed.add_field(name="終了時刻", value=f"<t:{int(gw['end_time'])}:f>", inline=False)
+    host = guild.get_member(int(gw["host_id"]))
+    embed.add_field(name="Hosted by", value=host.mention if host else f"<@{gw['host_id']}>", inline=True)
+    embed.add_field(name="Entries", value=str(len(entries)), inline=True)
+    embed.add_field(name="Winners", value=str(gw["winners"]), inline=True)
+    embed.set_footer(text="🎊 ギブアウェイ終了")
+
+    view = discord.ui.View()
+    btn = discord.ui.Button(label="🎉", style=discord.ButtonStyle.primary, disabled=True)
+    view.add_item(btn)
+
+    try:
+        await msg.edit(embed=embed, view=view)
+    except Exception:
+        pass
+
+    gw["ended"] = True
+    if winner_count == 0:
+        await channel.send("😢 参加者がいなかったため、当選者なしでギブアウェイが終了しました。")
+        gw["winner_ids"] = []
+    else:
+        winner_ids = random.sample(entries, winner_count)
+        gw["winner_ids"] = winner_ids
+        mentions = " ".join(f"<@{w}>" for w in winner_ids)
+        await channel.send(
+            f"🎊 **ギブアウェイ終了！**\n"
+            f"**{gw['prize']}** の当選者: {mentions}\nおめでとうございます！🎉"
+        )
+
+    settings["giveaways"][guild_id][msg_id] = gw
+    save_settings(settings)
+
+
+async def giveaway_timer_task():
+    await client.wait_until_ready()
+    while not client.is_closed():
+        try:
+            settings = load_settings()
+            now = _time.time()
+            for guild_id, giveaways in settings.get("giveaways", {}).items():
+                guild = client.get_guild(int(guild_id))
+                if not guild:
+                    continue
+                for msg_id, gw in list(giveaways.items()):
+                    if gw.get("ended"):
+                        continue
+                    if now >= gw["end_time"]:
+                        ch_id = gw.get("channel_id")
+                        if ch_id:
+                            await _end_giveaway(guild, ch_id, msg_id, gw, settings)
+        except Exception:
+            pass
+        await asyncio.sleep(15)
+
+
+class GiveawayModal(discord.ui.Modal, title="ギブアウェイを作成"):
+    duration = discord.ui.TextInput(
+        label="Duration（例: 1h, 30m, 1d）",
+        placeholder="Ex: 1h",
+        required=True
+    )
+    winners = discord.ui.TextInput(
+        label="Number of Winners",
+        placeholder="1",
+        default="1",
+        required=True
+    )
+    prize = discord.ui.TextInput(
+        label="Prize（景品名）",
+        placeholder="例: Robux 1000",
+        required=True
+    )
+    description = discord.ui.TextInput(
+        label="Description（説明・省略可）",
+        placeholder="例: 条件: サーバーメンバーであること",
+        required=False,
+        style=discord.TextStyle.paragraph,
+        max_length=1000
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        dur = self.duration.value.strip().lower()
+        seconds = 0
+        try:
+            if dur.endswith("m"):
+                seconds = int(dur[:-1]) * 60
+            elif dur.endswith("h"):
+                seconds = int(dur[:-1]) * 3600
+            elif dur.endswith("d"):
+                seconds = int(dur[:-1]) * 86400
+            else:
+                await interaction.response.send_message("⚠️ 時間形式が正しくありません（例: 1h, 30m, 1d）", ephemeral=True)
+                return
+        except ValueError:
+            await interaction.response.send_message("⚠️ 時間の数値が正しくありません。", ephemeral=True)
+            return
+
+        try:
+            winner_count = max(1, int(self.winners.value.strip()))
+        except ValueError:
+            await interaction.response.send_message("⚠️ 当選人数は整数で入力してください。", ephemeral=True)
+            return
+
+        end_time = _time.time() + seconds
+        discord_ts = f"<t:{int(end_time)}:R>"
+        discord_ts_full = f"<t:{int(end_time)}:f>"
+        host = interaction.user
+
+        embed = discord.Embed(
+            title=self.prize.value,
+            description=self.description.value or "",
+            color=discord.Color.blurple()
+        )
+        embed.add_field(name="Ends", value=f"{discord_ts} ({discord_ts_full})", inline=False)
+        embed.add_field(name="Hosted by", value=host.mention, inline=True)
+        embed.add_field(name="Entries", value="0", inline=True)
+        embed.add_field(name="Winners", value=str(winner_count), inline=True)
+
+        await interaction.response.send_message("✅ ギブアウェイを作成しました！", ephemeral=True)
+        msg = await interaction.channel.send(embed=embed, view=GiveawayPanelView())
+
+        settings = load_settings()
+        guild_id = str(interaction.guild.id)
+        if "giveaways" not in settings:
+            settings["giveaways"] = {}
+        if guild_id not in settings["giveaways"]:
+            settings["giveaways"][guild_id] = {}
+        settings["giveaways"][guild_id][str(msg.id)] = {
+            "prize": self.prize.value,
+            "description": self.description.value or "",
+            "winners": winner_count,
+            "end_time": end_time,
+            "host_id": str(host.id),
+            "channel_id": str(interaction.channel.id),
+            "entries": [],
+            "ended": False
+        }
+        save_settings(settings)
+
+
+@tree.command(name="giv", description="ギブアウェイを作成します")
+async def create_giveaway(interaction: discord.Interaction):
+    await interaction.response.send_modal(GiveawayModal())
 
 # ==================== 偽パネル ====================
 
@@ -371,7 +595,7 @@ def can_use_casino(message, settings):
     guild_id = str(message.guild.id)
     role_id = settings.get("kjn_role", {}).get(guild_id)
     if not role_id:
-        return False  # ロール未設定なら誰も使えない
+        return False
     return any(str(r.id) == role_id for r in message.author.roles)
 
 
@@ -394,16 +618,11 @@ class BetModal(discord.ui.Modal, title="賭け金を入力"):
             await interaction.response.send_message(f"💸 残高不足！現在の残高: **{bal}円**", ephemeral=True)
             return
 
-        # 賭け金に応じて当たり確率を調整（多いほど当たりやすい）
         base_symbols = ["🍒", "🍋", "🍇", "⭐", "💎", "7️⃣"]
-        # 賭け金が多いほど高額シンボルが激出やすい
-        # 🍒60% 🍋55% 🍇50% ⭐45% 7️⃣35% 💎30% (固定)
         weights = [60, 55, 50, 45, 35, 30]
 
-        # 1リール目を決めて、一定確率で揃える
         reel1 = _casino_random.choices(base_symbols, weights=weights)[0]
         idx = base_symbols.index(reel1)
-        # 揃う確率: 賭け金が多いほど高い
         if bet >= 300000:
             match_chance = 0.74
         elif bet >= 10000:
@@ -424,7 +643,6 @@ class BetModal(discord.ui.Modal, title="賭け金を入力"):
         if _casino_random.random() < match_chance:
             reels = [reel1, reel1, reel1]
         else:
-            # バラバラにする（揃わないようにする）
             reels = [reel1]
             for _ in range(2):
                 others = [s for s in base_symbols if s != reel1]
@@ -433,7 +651,6 @@ class BetModal(discord.ui.Modal, title="賭け金を入力"):
 
         result = "".join(reels)
 
-        # 払い戻し倍率
         sym_multipliers = {
             "💎💎💎": 6.0,
             "7️⃣7️⃣7️⃣": 5.0,
@@ -444,7 +661,6 @@ class BetModal(discord.ui.Modal, title="賭け金を入力"):
         }
         sym_mult = sym_multipliers.get(result, 0)
         payout = int(bet * sym_mult) if sym_mult > 0 else 0
-        base = sym_mult
         new_bal = bal - bet + payout
         set_balance(settings, guild_id, interaction.user.id, new_bal)
         last_bets[interaction.user.id] = bet
@@ -542,7 +758,6 @@ async def send_ticket_log(channel, guild, guild_id, owner_id, settings):
     if not log_channel:
         return
 
-    # チャンネルのメッセージを取得してログを作成
     lines = [f"=== チケットログ: #{channel.name} ==="]
     owner = guild.get_member(int(owner_id)) if owner_id else None
     lines.append(f"作成者: {owner.display_name if owner else owner_id}")
@@ -576,7 +791,6 @@ class TicketCreateButton(discord.ui.View):
         category_id = ticket_cfg.get("category_id")
         mention_role_id = ticket_cfg.get("mention_role_id")
 
-        # 既存チケットチェック
         existing = ticket_cfg.get("open_tickets", {}).get(str(interaction.user.id))
         if existing:
             ch = interaction.guild.get_channel(int(existing))
@@ -584,7 +798,6 @@ class TicketCreateButton(discord.ui.View):
                 await interaction.response.send_message(f"⚠️ すでにチケットがあります: {ch.mention}", ephemeral=True)
                 return
 
-        # チャンネル作成
         category = interaction.guild.get_channel(int(category_id)) if category_id else None
         overwrites = {
             interaction.guild.default_role: discord.PermissionOverwrite(view_channel=False),
@@ -602,7 +815,6 @@ class TicketCreateButton(discord.ui.View):
             overwrites=overwrites
         )
 
-        # チケット記録
         if "ticket" not in settings:
             settings["ticket"] = {}
         if guild_id not in settings["ticket"]:
@@ -614,14 +826,12 @@ class TicketCreateButton(discord.ui.View):
 
         await interaction.response.send_message(f"✅ チケットを作成しました: {ch.mention}", ephemeral=True)
 
-        # ロールメンション
         mention_txt = ""
         if mention_role_id:
             role = interaction.guild.get_role(int(mention_role_id))
             if role:
                 mention_txt = role.mention
 
-        # チケット内パネル送信
         desc = f"{interaction.user.mention} のチケットです。\nまずRoblox IDを入力してください。"
         embed = discord.Embed(title="🎫 チケット", description=desc, color=discord.Color.blue())
         await ch.send(content=mention_txt if mention_txt else None, embed=embed, view=TicketPanelView(str(interaction.user.id)))
@@ -648,13 +858,11 @@ class RobloxIDModal(discord.ui.Modal, title="Roblox IDを入力"):
 
         await interaction.response.defer()
 
-        # Roblox APIでユーザー情報取得
         username = self.roblox_id.value.strip()
         avatar_url = None
         display_name = None
         try:
             async with aiohttp.ClientSession() as session:
-                # ユーザーID取得
                 async with session.post(
                     "https://users.roblox.com/v1/usernames/users",
                     json={"usernames": [username], "excludeBannedUsers": False}
@@ -664,7 +872,6 @@ class RobloxIDModal(discord.ui.Modal, title="Roblox IDを入力"):
                     if users:
                         roblox_user_id = users[0]["id"]
                         display_name = users[0].get("displayName", username)
-                        # アバター画像取得
                         async with session.get(
                             f"https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds={roblox_user_id}&size=150x150&format=Png"
                         ) as thumb_resp:
@@ -934,7 +1141,6 @@ async def show_balances(interaction: discord.Interaction):
         member = interaction.guild.get_member(int(uid))
         if not member:
             continue
-        # kjnロール持ちのみ表示
         if role_id and not any(str(r.id) == role_id for r in member.roles):
             continue
         lines.append(f"{member.display_name}: **{bal}円**")
@@ -979,7 +1185,6 @@ async def set_kjnpn(interaction: discord.Interaction, チャンネル: discord.T
     settings["kjnpn"][guild_id] = str(チャンネル.id)
     save_settings(settings)
 
-    # 初回メッセージを送信してIDを保存
     msg = await チャンネル.send("💰 **残高一覧** (更新中...)")
     settings["kjnpn_msg"] = settings.get("kjnpn_msg", {})
     settings["kjnpn_msg"][guild_id] = str(msg.id)
@@ -1060,7 +1265,6 @@ async def bypass_url(interaction: discord.Interaction, url: str):
     import urllib.parse, json as _json
     encoded = urllib.parse.quote(url, safe="")
 
-    # 試すAPIリスト（順番に試して成功したら送信）
     async def try_get(session, api_url):
         async with session.get(api_url, timeout=aiohttp.ClientTimeout(total=20)) as resp:
             text = await resp.text()
@@ -1078,7 +1282,6 @@ async def bypass_url(interaction: discord.Interaction, url: str):
             except Exception:
                 return None
             return data.get("destination") or data.get("result") or data.get("url") or data.get("bypassed") or data.get("link") or data.get("bypassed_url")
-
 
     async with aiohttp.ClientSession() as session:
         def valid(r):
@@ -1144,7 +1347,6 @@ async def jisin_error(interaction: discord.Interaction, error):
 
 # ==================== プレフィックスコマンド ====================
 
-# 地震速報の最後のIDを記録
 _last_jisin_id = set()
 
 async def jisin_task():
@@ -1156,10 +1358,8 @@ async def jisin_task():
                 async with session.get("https://weathernews.jp/quake/", timeout=aiohttp.ClientTimeout(total=10)) as resp:
                     html = await resp.text()
             import re as _re
-            # 地震情報を抽出
             matches = _re.findall(r'<div class="quakeListItem[^"]*"[^>]*>(.*?)</div>', html, _re.DOTALL)
             if not matches:
-                # 別のパターンで試す
                 matches = _re.findall(r'M[\d\.]+.*?震度[\d強弱]+', html)
 
             settings = load_settings()
@@ -1170,7 +1370,6 @@ async def jisin_task():
                 ch = guild.get_channel(int(ch_id))
                 if not ch:
                     continue
-                # 最新の地震情報を取得
                 mag = _re.search(r'マグニチュード.*?([\d\.]+)', html)
                 depth = _re.search(r'深さ.*?(\d+)km', html)
                 shindo = _re.search(r'最大震度.*?([\d強弱]+)', html)
@@ -1182,7 +1381,6 @@ async def jisin_task():
                         _last_jisin_id.add(info_id)
                         if len(_last_jisin_id) > 50:
                             _last_jisin_id = set(list(_last_jisin_id)[-50:])
-                        msg = "\U0001f6a8 **地震速報**\n"
                         msg = "\U0001f6a8 **\u5730\u9707\u901f\u5831**\n"
                         if place:
                             msg += "\u9707\u6e90\u5730: " + place.group(1) + "\n"
@@ -1194,30 +1392,27 @@ async def jisin_task():
                             msg += "\u6df1\u3055: " + depth.group(1) + "km"
         except Exception:
             pass
-        await asyncio.sleep(60)  # 1分ごとにチェック
+        await asyncio.sleep(60)
 
 @client.event
 async def on_ready():
-    # 永続ビューを登録（再起動後もボタンが機能する）
     client.add_view(CasinoPanelView())
     client.add_view(NisePanelView())
     client.add_view(BetButtonView())
-    # 古いcustom_idのビューも登録（後方互換）
     client.add_view(TicketCreateButton())
     client.add_view(LuaPurchaseView())
     client.add_view(TicketPanelView())
     client.add_view(ProductSelectView())
     client.add_view(HubPriceView())
     client.add_view(LuaPriceView())
-    client.add_view(TicketPanelView())
-    client.add_view(ProductSelectView())
+    client.add_view(GiveawayPanelView())
     await tree.sync()
-    # 保存済みの自動返信状態を復元
     settings = load_settings()
     for gid in settings.get("autoreply_guilds", []):
         autoreply_guilds.add(int(gid))
     print(f"✅ 起動しました: {client.user}")
     client.loop.create_task(jisin_task())
+    client.loop.create_task(giveaway_timer_task())
 
 @client.event
 async def on_member_join(member: discord.Member):
@@ -1259,7 +1454,6 @@ async def _handle_message(message):
     guild_id = str(message.guild.id)
     settings = load_settings()
 
-    # チケットチャンネルで画像が送られたらロールメンション
     settings = load_settings()
     guild_id = str(message.guild.id) if message.guild else None
     if guild_id and message.attachments:
@@ -1304,7 +1498,7 @@ async def _handle_message(message):
         await message.delete()
         return
 
-    # !zn+ @user 金額 - 管理者が残高を付与
+    # !zn+ @user 金額
     if message.content.startswith("!zn+ "):
         if not message.author.guild_permissions.administrator:
             await message.reply("⚠️ このコマンドは管理者のみ使えます。")
@@ -1329,7 +1523,7 @@ async def _handle_message(message):
         await message.reply(target.mention + " に **" + str(amount) + "円** 付与しました！残高: **" + str(cur + amount) + "円**")
         return
 
-    # !zn- @user 金額 - 管理者が残高を減らす
+    # !zn- @user 金額
     if message.content.startswith("!zn- "):
         if not message.author.guild_permissions.administrator:
             await message.reply("⚠️ このコマンドは管理者のみ使えます。")
@@ -1383,6 +1577,23 @@ async def _handle_message(message):
         await message.reply(txt)
         return
 
+    # ?giv - ギブアウェイ当選者確認
+    if message.content.strip() == "?giv":
+        settings = load_settings()
+        guild_id = str(message.guild.id)
+        giveaways = settings.get("giveaways", {}).get(guild_id, {})
+        ended = {k: v for k, v in giveaways.items() if v.get("ended")}
+        if not ended:
+            await message.reply("まだ終了したギブアウェイはありません。")
+            return
+        lines = []
+        for msg_id, gw in sorted(ended.items(), key=lambda x: -x[1].get("end_time", 0))[:5]:
+            winner_ids = gw.get("winner_ids", [])
+            winners_txt = " ".join(f"<@{w}>" for w in winner_ids) if winner_ids else "なし"
+            lines.append(f"**{gw['prize']}**: {winners_txt}")
+        await message.reply("🎊 **直近のギブアウェイ当選者**\n" + "\n".join(lines))
+        return
+
     # ?gif - ランダムプレゼント
     if message.content.startswith("?gif"):
         parts = message.content.split()
@@ -1398,7 +1609,7 @@ async def _handle_message(message):
         await message.delete()
         return
 
-    # ?ban @ユーザー - BANコマンド
+    # ?b @ユーザー - BAN
     if message.content.startswith("?b ") and message.mentions:
         if not message.author.guild_permissions.ban_members:
             await message.reply("⚠️ BAN権限がありません。")
@@ -1411,7 +1622,7 @@ async def _handle_message(message):
             await message.reply(f"⚠️ エラー: {e}")
         return
 
-    # ?to @ユーザー 時間 - タイムアウト（最大28日）
+    # ?t @ユーザー 時間 - タイムアウト
     if message.content.startswith("?t ") and message.mentions:
         if not message.author.guild_permissions.moderate_members:
             await message.reply("⚠️ タイムアウト権限がありません。")
@@ -1431,7 +1642,7 @@ async def _handle_message(message):
         else:
             await message.reply("時間形式: 30m / 1h / 7d / 28d")
             return
-        seconds = min(seconds, 28 * 86400)  # 最大28日
+        seconds = min(seconds, 28 * 86400)
         target = message.mentions[0]
         from datetime import timedelta, timezone, datetime
         until = datetime.now(timezone.utc) + timedelta(seconds=seconds)
@@ -1467,13 +1678,11 @@ async def _handle_message(message):
         return
 
     # 自動返信処理
-    # チケットチャンネルでは自動返信しない
     open_tickets_all = settings.get("ticket", {}).get(str(message.guild.id), {}).get("open_tickets", {})
     if any(cid == str(message.channel.id) for cid in open_tickets_all.values()):
         pass
     bl_channels = settings.get("bl_channels", {}).get(str(message.guild.id), [])
     if message.guild.id in autoreply_guilds and not message.content.strip().startswith(("?", "？")) and not any(cid == str(message.channel.id) for cid in open_tickets_all.values()) and str(message.channel.id) not in bl_channels:
-        # 人間へのメンションや人間への返信は無視
         has_human_mention = message.mentions and any(not m.bot for m in message.mentions)
         ref = message.reference
         is_reply_to_human = False
@@ -1508,7 +1717,6 @@ async def _handle_message(message):
             if matched:
                 await message.reply(matched)
             else:
-                # ○○なにしてる？パターン：メンバー名が先に来てキーワードが後の場合のみ
                 impersonate_target = None
                 impersonate_name = None
                 has_nani_kw = False
@@ -1516,7 +1724,6 @@ async def _handle_message(message):
                 for kw in nani_keywords:
                     if kw in message.content:
                         has_nani_kw = True
-                        # botへのメンション・botへの返信の場合はなりきりしない→通常返信
                         if is_bot_mention or is_reply_to_bot:
                             has_nani_kw = False
                             break
@@ -1524,7 +1731,6 @@ async def _handle_message(message):
                             if member.bot:
                                 continue
                             for name in [member.display_name, member.name]:
-                                # 名前がキーワードより前にある場合のみ一致とする
                                 idx_name = message.content.find(name)
                                 idx_kw = message.content.find(kw)
                                 if idx_name != -1 and idx_kw != -1 and idx_name < idx_kw:
@@ -1535,7 +1741,6 @@ async def _handle_message(message):
                                 break
                         break
 
-                # 「なにしてる」系でメンバー特定できない場合はスルー（bot宛ては除く）
                 if has_nani_kw and not impersonate_target and not is_bot_mention and not is_reply_to_bot:
                     return
 
@@ -1563,7 +1768,6 @@ async def _handle_message(message):
                                 pass
                 else:
                     yak_style = settings.get("yak", {}).get(guild_id, {}).get(str(message.author.id))
-                    msg_lower = message.content.lower()
 
                     jp_chars = sum(1 for c in message.content if unicodedata.east_asian_width(c) in ('W', 'F', 'H') and ord(c) > 127)
                     en_words = [w for w in re.findall(r"[a-zA-Z]+", message.content) if len(w) >= 2]
@@ -1582,8 +1786,6 @@ async def _handle_message(message):
                     cfg.system_instruction = sys_prompt
                     cfg.max_output_tokens = 200
 
-                    # 画像が添付されている場合
-                    # 画像が添付されている場合
                     if message.attachments and message.attachments[0].content_type and message.attachments[0].content_type.startswith("image/"):
                         img_url = message.attachments[0].url
                         async with aiohttp.ClientSession() as _sess:
@@ -1595,7 +1797,7 @@ async def _handle_message(message):
                         contents = [{"role": "user", "parts": [{"inline_data": {"mime_type": ct, "data": img_b64}}, {"text": message.content or "この画像について一言"}]}]
                     else:
                         contents = [{"role": "user", "parts": [{"text": message.content or "…"}]}]
-                    # 会話履歴を取得
+
                     hist = autoreply_histories.get(message.author.id, [])
                     full_contents = hist + contents if hist else contents
                     for _retry in range(3):
@@ -1613,9 +1815,8 @@ async def _handle_message(message):
                             raise
                         if response.text:
                             import re as _re
-                            # 思考テキスト（空白や制御文字）を除去
                             reply_text = response.text.strip()
-                            reply_text = _re.sub(r"\n{3,}", "\n", reply_text)  # 連続改行を1つに
+                            reply_text = _re.sub(r"\n{3,}", "\n", reply_text)
                             if not reply_text:
                                 pass
                             else:
@@ -1650,7 +1851,7 @@ async def _handle_message(message):
         await msg.delete()
         return
 
-    # ?mod - 現在の設定確認（10秒で消える）
+    # ?mod
     if message.content == "?mod":
         cfg = get_user_settings(message.author.id)
         m = cfg.get("model", DEFAULT_MODEL)
@@ -1662,11 +1863,10 @@ async def _handle_message(message):
         await msg.delete()
         return
 
-    # ?nan - コードを難読化してファイルで返す
+    # ?nan - コードを難読化
     if message.content.startswith("?nan"):
         lua_code = ""
 
-        # ファイル添付がある場合はそちらを優先
         if message.attachments:
             att = message.attachments[0]
             if att.filename.endswith((".lua", ".txt")):
@@ -1688,7 +1888,6 @@ async def _handle_message(message):
         status_msg = await message.reply("🔒 難読化中...")
         try:
             async with aiohttp.ClientSession() as session:
-                # WeAreDevs obfuscator API を叩く
                 async with session.post(
                     "https://wearedevs.net/api/obfuscate",
                     json={"script": lua_code},
@@ -1703,7 +1902,6 @@ async def _handle_message(message):
                             await status_msg.edit(content="✅ 難読化完了！")
                             await message.channel.send(file=file)
                         else:
-                            # レスポンス全体をデバッグ用に表示
                             await status_msg.edit(content=f"⚠️ 難読化失敗: `{str(data)[:200]}`")
                     else:
                         body = await resp.text()
@@ -1744,7 +1942,6 @@ async def _handle_message(message):
 
     query = message.content[4:].strip() if is_new else message.content[3:].strip()
 
-    # 最初に「考え中...」を送信してからストリーミング更新
     reply_msg = await message.reply("🤖 考え中...")
 
     try:
@@ -1768,7 +1965,6 @@ async def _handle_message(message):
         await reply_msg.edit(content=f"⚠️ エラー: {e}")
 
 # ============================================================
-# ↓ここを書き換えるだけでOK！
 DISCORD_TOKEN = os.environ.get("DISCORD_TOKEN")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 # ============================================================

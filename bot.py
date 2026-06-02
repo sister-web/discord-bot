@@ -342,7 +342,7 @@ async def _update_giveaway_message(message, gw, guild):
     discord_ts = f"<t:{int(gw['end_time'])}:R>"
     discord_ts_full = f"<t:{int(gw['end_time'])}:f>"
     host = guild.get_member(int(gw["host_id"]))
-    host_display = f"@{host.display_name}" if host else f"<@{gw['host_id']}>"
+    host_display = host.mention if host else f"<@{gw['host_id']}>"
     entries = len(gw.get("entries", []))
     discord_ts = f"<t:{int(gw['end_time'])}:R>"
     discord_ts_full = f"<t:{int(gw['end_time'])}:f>"
@@ -380,7 +380,7 @@ async def _end_giveaway(guild, channel_id, msg_id, gw, settings):
     winner_count = min(gw["winners"], len(entries))
 
     host = guild.get_member(int(gw["host_id"]))
-    host_display = f"@{host.display_name}" if host else f"<@{gw['host_id']}>"
+    host_display = host.mention if host else f"<@{gw['host_id']}>"
     base_desc = (gw.get("description", "") + "\n\n") if gw.get("description") else ""
     end_desc = base_desc
     end_desc += f"**終了時刻:** <t:{int(gw['end_time'])}:f>\n"
@@ -496,7 +496,7 @@ class GiveawayModal(discord.ui.Modal, title="ギブアウェイを作成"):
 
         desc = (self.description.value + "\n\n") if self.description.value else ""
         desc += f"**Ends:** {discord_ts} ({discord_ts_full})\n"
-        desc += f"**Hosted by:** @{host.display_name}\n**Entries:** 0\n**Winners:** {winner_count}"
+        desc += f"**Hosted by:** {host.mention}\n**Entries:** 0\n**Winners:** {winner_count}"
         embed = discord.Embed(
             title=self.prize.value,
             description=desc,

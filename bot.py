@@ -1446,9 +1446,12 @@ async def on_ready():
     settings = load_settings()
     for gid in settings.get("autoreply_guilds", []):
         autoreply_guilds.add(int(gid))
+    for gid in settings.get("snitch_guilds", []):
+        snitch_guilds.add(int(gid))
     print(f"✅ 起動しました: {client.user}")
     client.loop.create_task(jisin_task())
     client.loop.create_task(giveaway_timer_task())
+    client.loop.create_task(_cache_cleanup_task())
 
 @client.event
 async def on_member_join(member: discord.Member):
@@ -1474,6 +1477,10 @@ async def on_member_remove(member: discord.Member):
         if ch:
             await ch.send(msg.replace("{user}", member.mention))
 
+# ==================== 削除メッセージ監視 ====================
+# キャッシュ: {message_id: {"content": str, "author_id": int, "guild_id": int, "channel_id": int, "time": float}}
+_msg_cache = {}
+
 @client.event
 async def on_message(message):
     if message.author.bot:
@@ -1481,7 +1488,56 @@ async def on_message(message):
     if message.guild is None:
         await message.channel.send("このBOTへのメッセージは確認できません。")
         return
+    # キャッシュに保存（5時間後に消える）
+    if message.content:
+        _msg_cache[message.id] = {
+            "content": message.content,
+            "author_id": message.author.id,
+            "guild_id": message.guild.id,
+            "channel_id": message.channel.id,
+            "time": _time.time()
+        }
     asyncio.get_event_loop().create_task(_handle_message(message))
+
+# snitch ON状態のギルドID
+snitch_guilds = set()
+
+@client.event
+async def on_message_delete(message):
+    if not message.guild:
+        return
+    if message.guild.id not in snitch_guilds:
+        return
+
+    content = message.content
+    author = message.author
+
+    if not content:
+        cached = _msg_cache.get(message.id)
+        if cached:
+            content = cached["content"]
+            member = message.guild.get_member(cached["author_id"])
+            if member:
+                author = member
+
+    if not content:
+        return
+    if author and author.bot:
+        return
+
+    mention = author.mention if author else "不明"
+    try:
+        await message.channel.send(f"{mention} : {content}")
+    except Exception:
+        pass
+
+async def _cache_cleanup_task():
+    while True:
+        await asyncio.sleep(600)
+        now = _time.time()
+        expired = [mid for mid, data in _msg_cache.items() if now - data["time"] > 18000]
+        for mid in expired:
+            _msg_cache.pop(mid, None)
 
 async def _handle_message(message):
     if not message.guild:
@@ -1501,6 +1557,30 @@ async def _handle_message(message):
                 role = message.guild.get_role(int(mention_role_id))
                 if role:
                     await message.channel.send(f"{role.mention} 購入確認の写真が届きました！")
+
+    # ?k - 削除メッセージ表示ON/OFF
+    if message.content.strip() in ("?k", "？k"):
+        gid = message.guild.id
+        settings = load_settings()
+        if gid in snitch_guilds:
+            snitch_guilds.discard(gid)
+            sg_list = settings.get("snitch_guilds", [])
+            if str(gid) in sg_list:
+                sg_list.remove(str(gid))
+            settings["snitch_guilds"] = sg_list
+            msg = await message.reply("🔴 削除メッセージ表示をOFFにしました。")
+        else:
+            snitch_guilds.add(gid)
+            sg_list = settings.get("snitch_guilds", [])
+            if str(gid) not in sg_list:
+                sg_list.append(str(gid))
+            settings["snitch_guilds"] = sg_list
+            msg = await message.reply("🟢 削除メッセージ表示をONにしました。")
+        save_settings(settings)
+        await message.delete()
+        await asyncio.sleep(10)
+        await msg.delete()
+        return
 
     # ?jo - 自動返信モデル確認
     if message.content.strip() == "?jo":
@@ -1650,29 +1730,45 @@ async def _handle_message(message):
         await message.delete()
         return
 
-    # ?b @ユーザー - BAN
+    # ?b @ユーザー 理由 - BAN（理由省略可）
     if message.content.startswith("?b ") and message.mentions:
         if not message.author.guild_permissions.ban_members:
             await message.reply("⚠️ BAN権限がありません。")
             return
         target = message.mentions[0]
+        # メンション部分を除いた残りを理由にする
+        raw = message.content[3:].strip()
+        # メンションテキストを除去
+        import re as _bre
+        reason_text = _bre.sub(r"<@!?\d+>", "", raw).strip()
+        reason = f"{reason_text}（by {message.author.name}）" if reason_text else f"BANby{message.author.name}"
         try:
-            await target.ban(reason=f"BANby{message.author.name}")
-            await message.reply(f"🔨 {target.mention} をBANしました。")
+            await target.ban(reason=reason)
+            reason_disp = f"　理由: {reason_text}" if reason_text else ""
+            await message.reply(f"🔨 {target.mention} をBANしました。{reason_disp}")
         except Exception as e:
             await message.reply(f"⚠️ エラー: {e}")
         return
 
-    # ?t @ユーザー 時間 - タイムアウト
+    # ?t @ユーザー 時間 理由 - タイムアウト（理由省略可）
     if message.content.startswith("?t ") and message.mentions:
         if not message.author.guild_permissions.moderate_members:
             await message.reply("⚠️ タイムアウト権限がありません。")
             return
+        import re as _tre
+        # メンションと時間を抽出
         parts = message.content.split()
-        if len(parts) < 3:
-            await message.reply("使い方: `?to @ユーザー 時間` (例: 1h, 30m, 7d, 28d)")
+        # 時間文字列を探す（m/h/d で終わるもの）
+        time_str = None
+        time_idx = None
+        for i, p in enumerate(parts):
+            if p.lower().endswith(("m", "h", "d")) and p[:-1].isdigit():
+                time_str = p.lower()
+                time_idx = i
+                break
+        if not time_str:
+            await message.reply("使い方: `?t @ユーザー 時間 理由` (例: ?t @user 1h 荒らし)")
             return
-        time_str = parts[-1].lower()
         seconds = 0
         if time_str.endswith("m"):
             seconds = int(time_str[:-1]) * 60
@@ -1680,16 +1776,17 @@ async def _handle_message(message):
             seconds = int(time_str[:-1]) * 3600
         elif time_str.endswith("d"):
             seconds = int(time_str[:-1]) * 86400
-        else:
-            await message.reply("時間形式: 30m / 1h / 7d / 28d")
-            return
         seconds = min(seconds, 28 * 86400)
+        # 時間より後の部分を理由にする
+        reason_text = " ".join(parts[time_idx+1:]).strip() if time_idx is not None else ""
+        reason = f"{reason_text}（by {message.author.name}）" if reason_text else f"TOby{message.author.name}"
         target = message.mentions[0]
         from datetime import timedelta, timezone, datetime
         until = datetime.now(timezone.utc) + timedelta(seconds=seconds)
         try:
-            await target.timeout(until, reason=f"TOby{message.author.name}")
-            await message.reply(f"⏰ {target.mention} を {time_str} タイムアウトしました。")
+            await target.timeout(until, reason=reason)
+            reason_disp = f"　理由: {reason_text}" if reason_text else ""
+            await message.reply(f"⏰ {target.mention} を {time_str} タイムアウトしました。{reason_disp}")
         except Exception as e:
             await message.reply(f"⚠️ エラー: {e}")
         return

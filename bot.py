@@ -1352,67 +1352,82 @@ async def jisin_error(interaction: discord.Interaction, error):
 # ==================== プレフィックスコマンド ====================
 
 _last_jisin_id = set()
+_jisin_initialized = False
+
+def _parse_jisin(quake: dict):
+    """気象庁JSONから地震情報を取り出す"""
+    eq = quake.get("earthquake", {})
+    hypo = eq.get("hypocenter", {})
+    place = hypo.get("name", "不明")
+    mag_val = hypo.get("magnitude", -1)
+    depth_val = hypo.get("depth", -1)
+    shindo_str = eq.get("maxScale", -1)
+    shindo_map = {
+        10: "1", 20: "2", 30: "3", 40: "4",
+        45: "5弱", 50: "5強", 55: "6弱", 60: "6強", 70: "7"
+    }
+    shindo_disp = shindo_map.get(shindo_str, "不明")
+    mag_disp = str(mag_val) if mag_val not in (-1, None) else "不明"
+    depth_disp = f"{depth_val}km" if depth_val not in (-1, None) else "不明"
+    msg = "🚨 **地震速報**\n"
+    msg += f"震源地: {place}\n"
+    msg += f"マグニチュード: M{mag_disp}\n"
+    msg += f"最大震度: {shindo_disp}\n"
+    msg += f"深さ: {depth_disp}"
+    return msg
 
 async def jisin_task():
-    global _last_jisin_id
+    global _last_jisin_id, _jisin_initialized
     await client.wait_until_ready()
-    # 起動時は直近1件だけIDを既読にして重複通知を防ぐ
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(
-                "https://api.p2pquake.net/v2/history?codes=551&limit=1",
-                timeout=aiohttp.ClientTimeout(total=10)
-            ) as resp:
-                data = await resp.json()
-                if data:
-                    _last_jisin_id.add(data[0].get("id", ""))
-    except Exception:
-        pass
+
+    # 起動時: 取得できるまでリトライして必ず既存IDを全部既読にする
+    while not _jisin_initialized:
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    "https://api.p2pquake.net/v2/history?codes=551&limit=30",
+                    timeout=aiohttp.ClientTimeout(total=15)
+                ) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        for q in data:
+                            qid = q.get("id") or q.get("_id", "")
+                            if qid:
+                                _last_jisin_id.add(str(qid))
+                        _jisin_initialized = True
+                    else:
+                        await asyncio.sleep(10)
+        except Exception:
+            await asyncio.sleep(10)
 
     while not client.is_closed():
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.get(
                     "https://api.p2pquake.net/v2/history?codes=551&limit=5",
-                    timeout=aiohttp.ClientTimeout(total=10)
+                    timeout=aiohttp.ClientTimeout(total=15)
                 ) as resp:
+                    if resp.status != 200:
+                        await asyncio.sleep(30)
+                        continue
                     quakes = await resp.json()
 
             settings = load_settings()
             jisin_channels = settings.get("jisin", {})
-            if not jisin_channels:
-                await asyncio.sleep(30)
-                continue
 
-            for quake in reversed(quakes):
-                qid = quake.get("id", "")
+            for quake in reversed(quakes):  # 古い順に処理
+                qid = str(quake.get("id") or quake.get("_id", ""))
                 if not qid or qid in _last_jisin_id:
                     continue
+
                 _last_jisin_id.add(qid)
-                if len(_last_jisin_id) > 100:
-                    _last_jisin_id = set(list(_last_jisin_id)[-100:])
+                if len(_last_jisin_id) > 300:
+                    _last_jisin_id = set(list(_last_jisin_id)[-300:])
 
-                eq = quake.get("earthquake", {})
-                hypo = eq.get("hypocenter", {})
+                if not jisin_channels:
+                    continue
 
-                place = hypo.get("name", "不明")
-                mag_val = hypo.get("magnitude", -1)
-                depth_val = hypo.get("depth", -1)
-                shindo_str = eq.get("maxScale", -1)
-
-                shindo_map = {
-                    10: "1", 20: "2", 30: "3", 40: "4",
-                    45: "5弱", 50: "5強", 55: "6弱", 60: "6強", 70: "7"
-                }
-                shindo_disp = shindo_map.get(shindo_str, "不明")
-                mag_disp = str(mag_val) if mag_val != -1 else "不明"
-                depth_disp = f"{depth_val}km" if depth_val != -1 else "不明"
-
-                msg_text = "🚨 **地震速報**\n"
-                msg_text += f"震源地: {place}\n"
-                msg_text += f"マグニチュード: M{mag_disp}\n"
-                msg_text += f"最大震度: {shindo_disp}\n"
-                msg_text += f"深さ: {depth_disp}"
+                msg_text = _parse_jisin(quake)
 
                 for guild_id, ch_id in jisin_channels.items():
                     guild = client.get_guild(int(guild_id))

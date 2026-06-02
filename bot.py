@@ -350,7 +350,7 @@ async def _update_giveaway_message(message, gw, guild):
     base_desc = (gw.get("description", "") + "\n\n") if gw.get("description") else ""
     desc = base_desc
     desc += f"**Ends:** {discord_ts} ({discord_ts_full})\n"
-    desc += f"**Hosted by:** {host_display}　**Entries:** {entries}　**Winners:** {gw['winners']}"
+    desc += f"**Hosted by:** {host_display}\n**Entries:** {entries}\n**Winners:** {gw['winners']}"
 
     embed = discord.Embed(
         title=gw["prize"],
@@ -384,7 +384,7 @@ async def _end_giveaway(guild, channel_id, msg_id, gw, settings):
     base_desc = (gw.get("description", "") + "\n\n") if gw.get("description") else ""
     end_desc = base_desc
     end_desc += f"**終了時刻:** <t:{int(gw['end_time'])}:f>\n"
-    end_desc += f"**Hosted by:** {host_display}　**Entries:** {len(entries)}　**Winners:** {gw['winners']}"
+    end_desc += f"**Hosted by:** {host_display}\n**Entries:** {len(entries)}\n**Winners:** {gw['winners']}"
 
     embed = discord.Embed(
         title=gw["prize"],
@@ -496,7 +496,7 @@ class GiveawayModal(discord.ui.Modal, title="ギブアウェイを作成"):
 
         desc = (self.description.value + "\n\n") if self.description.value else ""
         desc += f"**Ends:** {discord_ts} ({discord_ts_full})\n"
-        desc += f"**Hosted by:** @{host.display_name}　**Entries:** 0　**Winners:** {winner_count}"
+        desc += f"**Hosted by:** @{host.display_name}\n**Entries:** 0\n**Winners:** {winner_count}"
         embed = discord.Embed(
             title=self.prize.value,
             description=desc,
@@ -1503,9 +1503,10 @@ async def on_message(message):
     if message.guild is None:
         await message.channel.send("このBOTへのメッセージは確認できません。")
         return
-    # キャッシュに保存（5時間後に消える）。画像URLも保存
+    # キャッシュに保存（5時間後に消える）。コマンドは保存しない
     attachments_urls = [a.url for a in message.attachments] if message.attachments else []
-    if message.content or attachments_urls:
+    _is_command = message.content.strip().startswith(("?", "？", "!", "！")) if message.content else False
+    if (message.content or attachments_urls) and not _is_command:
         _msg_cache[message.id] = {
             "content": message.content,
             "author_id": message.author.id,
@@ -1555,34 +1556,41 @@ async def on_message_delete(message):
     if not has_content and not has_attachments:
         return
 
+    # コマンドは送らない
+    if content and content.strip().startswith(("?", "？", "!", "！")):
+        return
+
     mention = author.mention if author else "不明"
 
-    # テキストがあれば送信
-    if has_content:
-        try:
-            await message.channel.send(f"{mention} : {content}")
-        except Exception:
-            pass
-
-    # discord.pyキャッシュの添付ファイルを再送（URLが有効なうちに）
+    # テキスト+画像を一緒に送る
+    import io
+    files = []
     for att in attachments:
         try:
-            import io
             async with aiohttp.ClientSession() as _s:
                 async with _s.get(att.proxy_url or att.url) as _r:
                     if _r.status == 200:
                         data = await _r.read()
-                        file = discord.File(io.BytesIO(data), filename=att.filename)
-                        label = f"{mention} が削除した画像" if not has_content else ""
-                        await message.channel.send(label, file=file)
+                        files.append(discord.File(io.BytesIO(data), filename=att.filename))
         except Exception:
-            # URLが切れていた場合はURLだけ貼る
-            try:
-                await message.channel.send(f"{mention} が削除した画像: {att.url}")
-            except Exception:
-                pass
+            pass
 
-    # キャッシュ内のURLのみの場合
+    text = f"{mention} : {content}" if has_content else f"{mention} が削除した画像"
+
+    try:
+        if files:
+            await message.channel.send(text, files=files)
+        elif has_content:
+            await message.channel.send(text)
+    except Exception:
+        # ファイル送信失敗時はテキストだけ送る
+        try:
+            if has_content:
+                await message.channel.send(text)
+        except Exception:
+            pass
+
+    # キャッシュ内のURLのみの場合（ダウンロード失敗時）
     for url in cached_urls:
         try:
             await message.channel.send(f"{mention} が削除した画像: {url}")

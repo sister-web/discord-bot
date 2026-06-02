@@ -1503,13 +1503,15 @@ async def on_message(message):
     if message.guild is None:
         await message.channel.send("このBOTへのメッセージは確認できません。")
         return
-    # キャッシュに保存（5時間後に消える）
-    if message.content:
+    # キャッシュに保存（5時間後に消える）。画像URLも保存
+    attachments_urls = [a.url for a in message.attachments] if message.attachments else []
+    if message.content or attachments_urls:
         _msg_cache[message.id] = {
             "content": message.content,
             "author_id": message.author.id,
             "guild_id": message.guild.id,
             "channel_id": message.channel.id,
+            "attachments": attachments_urls,
             "time": _time.time()
         }
     asyncio.get_event_loop().create_task(_handle_message(message))
@@ -1526,25 +1528,66 @@ async def on_message_delete(message):
 
     content = message.content
     author = message.author
+    attachments = list(message.attachments)  # discord.pyキャッシュから
 
-    if not content:
-        cached = _msg_cache.get(message.id)
-        if cached:
-            content = cached["content"]
-            member = message.guild.get_member(cached["author_id"])
-            if member:
-                author = member
+    # 自前キャッシュから補完
+    cached = _msg_cache.get(message.id)
+    if cached:
+        if not content:
+            content = cached.get("content", "")
+        member = message.guild.get_member(cached["author_id"])
+        if member:
+            author = member
+        # 添付ファイルURLをキャッシュから取得（discord側のURLが切れていても対応）
+        if not attachments:
+            cached_urls = cached.get("attachments", [])
+        else:
+            cached_urls = []
+    else:
+        cached_urls = []
 
-    if not content:
-        return
     if author and author.bot:
         return
 
+    # テキストも画像も何もなければスルー
+    has_content = bool(content)
+    has_attachments = bool(attachments) or bool(cached_urls)
+    if not has_content and not has_attachments:
+        return
+
     mention = author.mention if author else "不明"
-    try:
-        await message.channel.send(f"{mention} : {content}")
-    except Exception:
-        pass
+
+    # テキストがあれば送信
+    if has_content:
+        try:
+            await message.channel.send(f"{mention} : {content}")
+        except Exception:
+            pass
+
+    # discord.pyキャッシュの添付ファイルを再送（URLが有効なうちに）
+    for att in attachments:
+        try:
+            import io
+            async with aiohttp.ClientSession() as _s:
+                async with _s.get(att.proxy_url or att.url) as _r:
+                    if _r.status == 200:
+                        data = await _r.read()
+                        file = discord.File(io.BytesIO(data), filename=att.filename)
+                        label = f"{mention} が削除した画像" if not has_content else ""
+                        await message.channel.send(label, file=file)
+        except Exception:
+            # URLが切れていた場合はURLだけ貼る
+            try:
+                await message.channel.send(f"{mention} が削除した画像: {att.url}")
+            except Exception:
+                pass
+
+    # キャッシュ内のURLのみの場合
+    for url in cached_urls:
+        try:
+            await message.channel.send(f"{mention} が削除した画像: {url}")
+        except Exception:
+            pass
 
 async def _cache_cleanup_task():
     while True:

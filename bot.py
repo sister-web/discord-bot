@@ -2004,12 +2004,12 @@ async def _handle_message(message):
 
                     if is_english:
                         if yak_style:
-                            sys_prompt = f"you're a real person on discord, {yak_style} personality. text like a normal human - casual, no punctuation at end, typos ok, short replies for short messages. never ask multiple questions. don't sound like AI."
+                            sys_prompt = f"You ARE a real human on Discord. Your personality: {yak_style}. STRICT RULES: text casually like a real person, no punctuation at end of sentences, typos are fine, keep replies short for short messages, max 1 question per reply, NEVER sound like AI or assistant, stay in character as {yak_style} at ALL times."
                         else:
                             sys_prompt = "you're a real person on discord. text like a normal human - casual, no punctuation at end, typos ok, short replies for short messages. never ask multiple questions. don't sound like AI."
                     else:
                         if yak_style:
-                            sys_prompt = f"discordでチャットしてる普通の人間。{yak_style}なキャラ。改行絶対しない。句読点なし。ため口。質問は1つまで。AIっぽさ禁止。"
+                            sys_prompt = f"あなたは今からDiscordでチャットしてるリアルな人間です。絶対に守るルール：キャラクター「{yak_style}」として振る舞う、改行しない、句読点なし、ため口、質問は1回まで、AIっぽい言い方禁止、アシスタントっぽい返答禁止。「{yak_style}」のキャラを絶対に崩さないで。"
                         else:
                             sys_prompt = "discordでチャットしてる高校生。改行絶対しない。句読点なし。ため口。wやwwや笑で感情表現。質問は1つまで。AIっぽさ禁止。"
                     cfg.system_instruction = sys_prompt

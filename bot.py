@@ -1519,6 +1519,8 @@ async def on_message(message):
 
 # snitch ON状態のギルドID
 snitch_guilds = set()
+# BOTが自分で消したメッセージID（snitchしない）
+_bot_deleted_ids = set()
 
 @client.event
 async def on_message_delete(message):
@@ -1527,9 +1529,20 @@ async def on_message_delete(message):
     if message.guild.id not in snitch_guilds:
         return
 
+    # BOT自身のメッセージ、またはBOTが削除したメッセージは通知しない
+    if message.author and message.author.bot:
+        return
+    if message.id in _bot_deleted_ids:
+        _bot_deleted_ids.discard(message.id)
+        return
+
     content = message.content
     author = message.author
     attachments = list(message.attachments)  # discord.pyキャッシュから
+
+    # コマンドメッセージは通知しない（discord.pyキャッシュのcontentも含む）
+    if content and content.strip().startswith(("?", "？", "!", "！")):
+        return
 
     # 自前キャッシュから補完
     cached = _msg_cache.get(message.id)
@@ -1643,6 +1656,8 @@ async def _handle_message(message):
             settings["snitch_guilds"] = sg_list
             msg = await message.reply("🟢 削除メッセージ表示をONにしました。")
         save_settings(settings)
+        _bot_deleted_ids.add(message.id)
+
         await message.delete()
         await asyncio.sleep(10)
         await msg.delete()
@@ -1650,6 +1665,8 @@ async def _handle_message(message):
 
     # ?jo - 自動返信モデル確認
     if message.content.strip() == "?jo":
+        _bot_deleted_ids.add(message.id)
+
         await message.delete()
         settings2 = load_settings()
         yak = settings2.get("yak", {}).get(str(message.guild.id), {})
@@ -1677,6 +1694,8 @@ async def _handle_message(message):
         embed = discord.Embed(title="🎰 カジノ", description=desc, color=discord.Color.gold())
         embed.add_field(name="💰 貭け金×倍率", value="💎💎💎 ×5.0 | 7️⃣7️⃣7️⃣ ×4.0 | ⭐⭐⭐ ×3.0 | 🍇🍇🍇 ×2.0 | 🍋🍋🍋 ×1.0 | 🍒🍒🍒 ×0.5")
         await message.channel.send(embed=embed, view=CasinoPanelView())
+        _bot_deleted_ids.add(message.id)
+
         await message.delete()
         return
 
@@ -1761,6 +1780,8 @@ async def _handle_message(message):
 
     # ?giv - 進行中ギブアウェイの参加者を表示
     if message.content.strip() == "?giv":
+        _bot_deleted_ids.add(message.id)
+
         await message.delete()
         settings = load_settings()
         guild_id = str(message.guild.id)
@@ -1793,6 +1814,8 @@ async def _handle_message(message):
         desc = "ボタンを押して参加しよう！\n当選者に **" + str(gif_amount) + "円** プレゼント！"
         embed = discord.Embed(title="🎁 プレゼント抽選！", description=desc, color=discord.Color.gold())
         await message.channel.send(embed=embed, view=GifView(gif_amount))
+        _bot_deleted_ids.add(message.id)
+
         await message.delete()
         return
 
@@ -1876,6 +1899,8 @@ async def _handle_message(message):
             settings["autoreply_guilds"] = ar_list
             msg = await message.reply("🟢 自動返信をONにしました。")
         save_settings(settings)
+        _bot_deleted_ids.add(message.id)
+
         await message.delete()
         await asyncio.sleep(10)
         await msg.delete()
@@ -2048,6 +2073,8 @@ async def _handle_message(message):
                 role = message.guild.get_role(int(rid))
                 role_names.append(f"・{role.name}" if role else f"・削除済みロール({rid})")
             text = "📋 **BOT使用可能ロール**\n" + "\n".join(role_names)
+        _bot_deleted_ids.add(message.id)
+
         await message.delete()
         msg = await message.channel.send(f"{message.author.mention}\n{text}\n*（このメッセージは10秒後に消えます）*")
         await asyncio.sleep(10)
@@ -2060,6 +2087,8 @@ async def _handle_message(message):
         m = cfg.get("model", DEFAULT_MODEL)
         t = cfg.get("thinking", DEFAULT_THINKING)
         text = f"⚙️ **あなたの現在の設定**\nモデル: `{m}`\n思考レベル: `{t}`\n\n変更するには `/mod` を使ってください。"
+        _bot_deleted_ids.add(message.id)
+
         await message.delete()
         msg = await message.channel.send(f"{message.author.mention}\n{text}\n*（このメッセージは10秒後に消えます）*")
         await asyncio.sleep(10)

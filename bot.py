@@ -1778,6 +1778,49 @@ async def _handle_message(message):
         await message.reply(txt)
         return
 
+    # ?givk @ユーザー - ギブアウェイから指定ユーザーを除外（管理者のみ）
+    if message.content.startswith("?givk") and message.mentions:
+        if not message.author.guild_permissions.administrator:
+            await message.reply("⚠️ このコマンドは管理者のみ使えます。")
+            return
+        _bot_deleted_ids.add(message.id)
+        await message.delete()
+        target = message.mentions[0]
+        settings = load_settings()
+        guild_id = str(message.guild.id)
+        giveaways = settings.get("giveaways", {}).get(guild_id, {})
+        active = {k: v for k, v in giveaways.items() if not v.get("ended") and _time.time() < v.get("end_time", 0)}
+        if not active:
+            tmp = await message.channel.send("⚠️ 進行中のギブアウェイはありません。")
+            await asyncio.sleep(5)
+            await tmp.delete()
+            return
+        removed = []
+        for msg_id, gw in active.items():
+            entries = gw.get("entries", [])
+            if str(target.id) in entries:
+                entries.remove(str(target.id))
+                gw["entries"] = entries
+                settings["giveaways"][guild_id][msg_id] = gw
+                removed.append(gw["prize"])
+                # パネルのembedを更新
+                ch = message.guild.get_channel(int(gw.get("channel_id", 0)))
+                if ch:
+                    try:
+                        panel_msg = await ch.fetch_message(int(msg_id))
+                        await _update_giveaway_message(panel_msg, gw, message.guild)
+                    except Exception:
+                        pass
+        if removed:
+            save_settings(settings)
+            tmp = await message.channel.send(f"✅ {target.mention} を **{'**, **'.join(removed)}** から除外しました。")
+        else:
+            tmp = await message.channel.send(f"⚠️ {target.mention} は進行中のギブアウェイに参加していません。")
+        await asyncio.sleep(5)
+        _bot_deleted_ids.add(tmp.id)
+        await tmp.delete()
+        return
+
     # ?giv - 進行中ギブアウェイの参加者を表示
     if message.content.strip() == "?giv":
         _bot_deleted_ids.add(message.id)

@@ -1529,6 +1529,9 @@ _msg_cache = {}
 @client.event
 async def on_message(message):
     if message.author.bot:
+        # BOT自身のメッセージIDを登録してsnitchしないようにする
+        if client.user and message.author.id == client.user.id:
+            _bot_sent_ids.add(message.id)
         return
     if message.guild is None:
         await message.channel.send("このBOTへのメッセージは確認できません。")
@@ -1561,9 +1564,7 @@ async def on_message_delete(message):
     if message.guild.id not in snitch_guilds:
         return
 
-    # BOT自身のメッセージ、またはBOTが削除・送信したメッセージは通知しない
-    if message.author and message.author.bot:
-        return
+    # BOTが送信・削除したメッセージは通知しない
     if message.id in _bot_deleted_ids:
         _bot_deleted_ids.discard(message.id)
         return
@@ -1571,11 +1572,18 @@ async def on_message_delete(message):
         _bot_sent_ids.discard(message.id)
         return
 
+    # authorがBOT（キャッシュあり・なし両対応）
+    if message.author and message.author.bot:
+        return
+    # client.userと照合（最も確実）
+    if client.user and message.author and message.author.id == client.user.id:
+        return
+
     content = message.content
     author = message.author
     attachments = list(message.attachments)  # discord.pyキャッシュから
 
-    # コマンドメッセージは通知しない（discord.pyキャッシュのcontentも含む）
+    # コマンドメッセージは通知しない
     if content and content.strip().startswith(("?", "？", "!", "！")):
         return
 
@@ -1587,6 +1595,9 @@ async def on_message_delete(message):
         member = message.guild.get_member(cached["author_id"])
         if member:
             author = member
+        # キャッシュのauthor_idがBOT自身なら通知しない
+        if client.user and cached["author_id"] == client.user.id:
+            return
         # 添付ファイルURLをキャッシュから取得（discord側のURLが切れていても対応）
         if not attachments:
             cached_urls = cached.get("attachments", [])
@@ -1649,6 +1660,14 @@ async def on_message_delete(message):
 async def on_message_edit(before, after):
     """編集は無視（削除検知の誤爆防止）"""
     pass
+
+# BOT自身が送ったメッセージをすべて_bot_sent_idsに登録
+_original_send = None
+async def _track_bot_message(coro):
+    msg = await coro
+    if msg and hasattr(msg, "id"):
+        _bot_sent_ids.add(msg.id)
+    return msg
 
 @client.event
 async def on_raw_message_delete(payload):

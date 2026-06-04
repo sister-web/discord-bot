@@ -533,7 +533,7 @@ async def create_giveaway(interaction: discord.Interaction):
 
 class CloseConfirmView(discord.ui.View):
     def __init__(self):
-        super().__init__(timeout=30)
+        super().__init__(timeout=None)
 
     @discord.ui.button(label="🗑️ チケットを削除する", style=discord.ButtonStyle.danger, custom_id="close_confirm_btn")
     async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):

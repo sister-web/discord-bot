@@ -529,6 +529,35 @@ class GiveawayModal(discord.ui.Modal, title="ギブアウェイを作成"):
 async def create_giveaway(interaction: discord.Interaction):
     await interaction.response.send_modal(GiveawayModal())
 
+# ==================== チケットクローズ確認ビュー ====================
+
+class CloseConfirmView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=30)
+
+    @discord.ui.button(label="🗑️ チケットを削除する", style=discord.ButtonStyle.danger, custom_id="close_confirm_btn")
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        settings = load_settings()
+        guild_id = str(interaction.guild.id)
+        open_tickets = settings.get("ticket", {}).get(guild_id, {}).get("open_tickets", {})
+        owner_id = next((uid for uid, cid in open_tickets.items() if cid == str(interaction.channel.id)), None)
+        if str(interaction.user.id) != owner_id and not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message("⚠️ チケット作成者または管理者のみ閉じられます。", ephemeral=True)
+            return
+        await interaction.response.send_message("🔒 チケットを閉じます...")
+        await send_ticket_log(interaction.channel, interaction.guild, guild_id, owner_id, settings)
+        if owner_id and owner_id in open_tickets:
+            del open_tickets[owner_id]
+            settings["ticket"][guild_id]["open_tickets"] = open_tickets
+            save_settings(settings)
+        await asyncio.sleep(2)
+        await interaction.channel.delete()
+
+    @discord.ui.button(label="キャンセル", style=discord.ButtonStyle.secondary, custom_id="close_cancel_btn")
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.message.delete()
+        await interaction.response.send_message("キャンセルしました。", ephemeral=True)
+
 # ==================== 偽パネル ====================
 
 class NisePanelView(discord.ui.View):
@@ -1457,6 +1486,7 @@ async def on_ready():
     client.add_view(HubPriceView())
     client.add_view(LuaPriceView())
     client.add_view(GiveawayPanelView())
+    client.add_view(CloseConfirmView())
     await tree.sync()
     settings = load_settings()
     for gid in settings.get("autoreply_guilds", []):
@@ -1860,6 +1890,46 @@ async def _handle_message(message):
         _bot_deleted_ids.add(message.id)
 
         await message.delete()
+        return
+
+    # ?close - チケットを閉じる確認パネル
+    if message.content.strip() == "?close":
+        settings = load_settings()
+        guild_id = str(message.guild.id)
+        open_tickets = settings.get("ticket", {}).get(guild_id, {}).get("open_tickets", {})
+        # チケットチャンネルかチェック
+        owner_id = next((uid for uid, cid in open_tickets.items() if cid == str(message.channel.id)), None)
+        if not owner_id:
+            await message.reply("⚠️ ここはチケットチャンネルではありません。", delete_after=5)
+            _bot_deleted_ids.add(message.id)
+            await message.delete()
+            return
+        _bot_deleted_ids.add(message.id)
+        await message.delete()
+        embed = discord.Embed(
+            title="🎫 チケットを閉じますか？",
+            description="削除ボタンを押すとチケットが閉じられます。",
+            color=discord.Color.red()
+        )
+        await message.channel.send(embed=embed, view=CloseConfirmView())
+        return
+
+    # ?kick @ユーザー 理由 - キック（理由省略可）
+    if message.content.startswith("?kick ") and message.mentions:
+        if not message.author.guild_permissions.kick_members:
+            await message.reply("⚠️ キック権限がありません。")
+            return
+        target = message.mentions[0]
+        import re as _kickre
+        raw = message.content[6:].strip()
+        reason_text = _kickre.sub(r"<@!?\d+>", "", raw).strip()
+        reason = f"{reason_text}（by {message.author.name}）" if reason_text else f"KICKby{message.author.name}"
+        try:
+            await target.kick(reason=reason)
+            reason_disp = f"　理由: {reason_text}" if reason_text else ""
+            await message.reply(f"👢 {target.mention} をキックしました。{reason_disp}")
+        except Exception as e:
+            await message.reply(f"⚠️ エラー: {e}")
         return
 
     # ?b @ユーザー 理由 - BAN（理由省略可）

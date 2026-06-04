@@ -1551,6 +1551,8 @@ async def on_message(message):
 snitch_guilds = set()
 # BOTが自分で消したメッセージID（snitchしない）
 _bot_deleted_ids = set()
+# BOTが送信したメッセージID（snitchしない）
+_bot_sent_ids = set()
 
 @client.event
 async def on_message_delete(message):
@@ -1559,11 +1561,14 @@ async def on_message_delete(message):
     if message.guild.id not in snitch_guilds:
         return
 
-    # BOT自身のメッセージ、またはBOTが削除したメッセージは通知しない
+    # BOT自身のメッセージ、またはBOTが削除・送信したメッセージは通知しない
     if message.author and message.author.bot:
         return
     if message.id in _bot_deleted_ids:
         _bot_deleted_ids.discard(message.id)
+        return
+    if message.id in _bot_sent_ids:
+        _bot_sent_ids.discard(message.id)
         return
 
     content = message.content
@@ -1640,6 +1645,16 @@ async def on_message_delete(message):
         except Exception:
             pass
 
+@client.event
+async def on_message_edit(before, after):
+    """編集は無視（削除検知の誤爆防止）"""
+    pass
+
+@client.event
+async def on_raw_message_delete(payload):
+    """キャッシュにないメッセージが消えた場合も_bot_sent_idsでガード"""
+    pass
+
 async def _cache_cleanup_task():
     while True:
         await asyncio.sleep(600)
@@ -1647,6 +1662,10 @@ async def _cache_cleanup_task():
         expired = [mid for mid, data in _msg_cache.items() if now - data["time"] > 18000]
         for mid in expired:
             _msg_cache.pop(mid, None)
+        if len(_bot_sent_ids) > 1000:
+            to_remove = list(_bot_sent_ids)[:500]
+            for mid in to_remove:
+                _bot_sent_ids.discard(mid)
 
 async def _handle_message(message):
     if not message.guild:
@@ -1690,7 +1709,13 @@ async def _handle_message(message):
 
         await message.delete()
         await asyncio.sleep(10)
-        await msg.delete()
+        try:
+
+            await msg.delete()
+
+        except Exception:
+
+            pass
         return
 
     # ?jo - 自動返信モデル確認
@@ -1711,7 +1736,13 @@ async def _handle_message(message):
             text = message.author.mention + " ⚙️ モード設定なし\n*(このメッセージは10秒後に消えます)*"
         msg = await message.channel.send(text)
         await asyncio.sleep(10)
-        await msg.delete()
+        try:
+
+            await msg.delete()
+
+        except Exception:
+
+            pass
         return
 
     # !kjn - カジノパネル
@@ -1823,7 +1854,13 @@ async def _handle_message(message):
         if not active:
             tmp = await message.channel.send("⚠️ 進行中のギブアウェイはありません。")
             await asyncio.sleep(5)
-            await tmp.delete()
+            try:
+
+                await tmp.delete()
+
+            except Exception:
+
+                pass
             return
         removed = []
         for msg_id, gw in active.items():
@@ -1848,7 +1885,13 @@ async def _handle_message(message):
             tmp = await message.channel.send(f"⚠️ {target.mention} は進行中のギブアウェイに参加していません。")
         await asyncio.sleep(5)
         _bot_deleted_ids.add(tmp.id)
-        await tmp.delete()
+        try:
+
+            await tmp.delete()
+
+        except Exception:
+
+            pass
         return
 
     # ?giv - 進行中ギブアウェイの参加者を表示
@@ -1863,7 +1906,13 @@ async def _handle_message(message):
         if not active:
             tmp = await message.channel.send("現在進行中のギブアウェイはありません。")
             await asyncio.sleep(10)
-            await tmp.delete()
+            try:
+
+                await tmp.delete()
+
+            except Exception:
+
+                pass
             return
         lines = []
         for msg_id, gw in active.items():
@@ -1872,7 +1921,13 @@ async def _handle_message(message):
             lines.append(f"**{gw['prize']}** ({len(entries)}人)\n{entry_mentions}")
         tmp = await message.channel.send("🎉 **進行中のギブアウェイ参加者**\n\n" + "\n\n".join(lines) + "\n\n*（このメッセージは10秒後に消えます）*")
         await asyncio.sleep(10)
-        await tmp.delete()
+        try:
+
+            await tmp.delete()
+
+        except Exception:
+
+            pass
         return
 
     # ?gif - ランダムプレゼント
@@ -2016,7 +2071,13 @@ async def _handle_message(message):
 
         await message.delete()
         await asyncio.sleep(10)
-        await msg.delete()
+        try:
+
+            await msg.delete()
+
+        except Exception:
+
+            pass
         return
 
     # 自動返信処理
@@ -2057,7 +2118,8 @@ async def _handle_message(message):
                     break
 
             if matched:
-                await message.reply(matched)
+                _sent = await message.reply(matched)
+                _bot_sent_ids.add(_sent.id)
             else:
                 impersonate_target = None
                 impersonate_name = None
@@ -2102,10 +2164,12 @@ async def _handle_message(message):
                     )
                     if response.text and response.text.strip():
                         try:
-                            await message.reply(response.text.strip()[:60])
+                            _sent = await message.reply(response.text.strip()[:60])
+                            _bot_sent_ids.add(_sent.id)
                         except Exception:
                             try:
-                                await message.channel.send(response.text.strip()[:60])
+                                _sent = await message.channel.send(response.text.strip()[:60])
+                                _bot_sent_ids.add(_sent.id)
                             except Exception:
                                 pass
                 else:
@@ -2167,10 +2231,12 @@ async def _handle_message(message):
                             if len(hist) > 20:
                                 autoreply_histories[message.author.id] = hist[-20:]
                             try:
-                                await message.reply(reply_text[:1000])
+                                _sent = await message.reply(reply_text[:1000])
+                                _bot_sent_ids.add(_sent.id)
                             except Exception:
                                 try:
-                                    await message.channel.send(reply_text[:1000])
+                                    _sent = await message.channel.send(reply_text[:1000])
+                                    _bot_sent_ids.add(_sent.id)
                                 except Exception:
                                     pass
         return
@@ -2191,7 +2257,13 @@ async def _handle_message(message):
         await message.delete()
         msg = await message.channel.send(f"{message.author.mention}\n{text}\n*（このメッセージは10秒後に消えます）*")
         await asyncio.sleep(10)
-        await msg.delete()
+        try:
+
+            await msg.delete()
+
+        except Exception:
+
+            pass
         return
 
     # ?mod
@@ -2205,7 +2277,13 @@ async def _handle_message(message):
         await message.delete()
         msg = await message.channel.send(f"{message.author.mention}\n{text}\n*（このメッセージは10秒後に消えます）*")
         await asyncio.sleep(10)
-        await msg.delete()
+        try:
+
+            await msg.delete()
+
+        except Exception:
+
+            pass
         return
 
     # ?nan - コードを難読化

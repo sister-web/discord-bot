@@ -1361,6 +1361,56 @@ async def nise_panel(interaction: discord.Interaction, 名前: str, 詳細: str,
     await interaction.channel.send(embed=embed, view=view)
     await interaction.response.send_message("✅ パネルを作成しました。", ephemeral=True)
 
+@tree.command(name="kes", description="自動削除キーワードを設定します（管理者のみ）")
+@app_commands.describe(
+    キーワード="含まれていたら削除するキーワード",
+    削除="このキーワードの設定を削除する場合はTrue"
+)
+@app_commands.checks.has_permissions(administrator=True)
+async def set_kes(interaction: discord.Interaction, キーワード: str, 削除: bool = False):
+    settings = load_settings()
+    guild_id = str(interaction.guild.id)
+    if "kes" not in settings:
+        settings["kes"] = {}
+    if guild_id not in settings["kes"]:
+        settings["kes"][guild_id] = []
+
+    if 削除:
+        if キーワード in settings["kes"][guild_id]:
+            settings["kes"][guild_id].remove(キーワード)
+            save_settings(settings)
+            await interaction.response.send_message(f"✅ `{キーワード}` を自動削除リストから削除しました。", ephemeral=True)
+        else:
+            await interaction.response.send_message(f"⚠️ `{キーワード}` は設定されていません。", ephemeral=True)
+        return
+
+    if キーワード not in settings["kes"][guild_id]:
+        settings["kes"][guild_id].append(キーワード)
+    save_settings(settings)
+    await interaction.response.send_message(f"✅ `{キーワード}` を自動削除キーワードに追加しました。", ephemeral=True)
+
+@set_kes.error
+async def kes_error(interaction: discord.Interaction, error):
+    if isinstance(error, app_commands.MissingPermissions):
+        await interaction.response.send_message("⚠️ このコマンドは管理者のみ使えます。", ephemeral=True)
+
+@tree.command(name="keslist", description="自動削除キーワード一覧を表示します（管理者のみ）")
+@app_commands.checks.has_permissions(administrator=True)
+async def kes_list(interaction: discord.Interaction):
+    settings = load_settings()
+    guild_id = str(interaction.guild.id)
+    keywords = settings.get("kes", {}).get(guild_id, [])
+    if not keywords:
+        await interaction.response.send_message("自動削除キーワードは設定されていません。", ephemeral=True)
+        return
+    text = "\n".join(f"・`{kw}`" for kw in keywords)
+    await interaction.response.send_message(f"🗑️ **自動削除キーワード一覧**\n{text}", ephemeral=True)
+
+@kes_list.error
+async def keslist_error(interaction: discord.Interaction, error):
+    if isinstance(error, app_commands.MissingPermissions):
+        await interaction.response.send_message("⚠️ このコマンドは管理者のみ使えます。", ephemeral=True)
+
 @tree.command(name="jisin", description="地震速報を送るチャンネルを設定します（管理者のみ）")
 @app_commands.describe(チャンネル="通知を送るチャンネル")
 @app_commands.checks.has_permissions(administrator=True)
@@ -1384,13 +1434,16 @@ _last_jisin_id = set()
 _jisin_initialized = False
 
 def _parse_jisin(quake: dict):
-    """気象庁JSONから地震情報を取り出す"""
+    """p2pquake APIから地震情報をembedで返す"""
     eq = quake.get("earthquake", {})
     hypo = eq.get("hypocenter", {})
     place = hypo.get("name", "不明")
     mag_val = hypo.get("magnitude", -1)
     depth_val = hypo.get("depth", -1)
     shindo_str = eq.get("maxScale", -1)
+    time_str = eq.get("time", "")
+    domestic_tsunami = eq.get("domesticTsunami", "None")
+
     shindo_map = {
         10: "1", 20: "2", 30: "3", 40: "4",
         45: "5弱", 50: "5強", 55: "6弱", 60: "6強", 70: "7"
@@ -1398,12 +1451,50 @@ def _parse_jisin(quake: dict):
     shindo_disp = shindo_map.get(shindo_str, "不明")
     mag_disp = str(mag_val) if mag_val not in (-1, None) else "不明"
     depth_disp = f"{depth_val}km" if depth_val not in (-1, None) else "不明"
-    msg = "🚨 **地震速報**\n"
-    msg += f"震源地: {place}\n"
-    msg += f"マグニチュード: M{mag_disp}\n"
-    msg += f"最大震度: {shindo_disp}\n"
-    msg += f"深さ: {depth_disp}"
-    return msg
+
+    # 津波情報
+    tsunami_map = {
+        "None": "この地震による津波の心配はありません。",
+        "Unknown": "津波の有無は不明です。",
+        "Checking": "津波の有無を確認中です。",
+        "NonEffective": "若干の海面変動があるかもしれません。",
+        "Watch": "⚠️ 津波注意報が発表されています。",
+        "Warning": "🚨 津波警報が発表されています！",
+    }
+    tsunami_disp = tsunami_map.get(domestic_tsunami, "")
+
+    # 震度で色を変える
+    if shindo_str is not None and shindo_str >= 55:
+        color = discord.Color.red()
+    elif shindo_str is not None and shindo_str >= 40:
+        color = discord.Color.orange()
+    else:
+        color = discord.Color.blue()
+
+    # 発生時刻を整形
+    title_time = time_str.replace("-", "/") if time_str else ""
+
+    embed = discord.Embed(
+        title="地震情報",
+        description=f"{title_time}頃、地震がありました。\n\n{tsunami_disp}",
+        color=color
+    )
+    embed.add_field(name="震央", value=place, inline=True)
+    embed.add_field(name="深さ", value=depth_disp, inline=True)
+    embed.add_field(name="マグニチュード", value=f"M{mag_disp}", inline=True)
+    embed.add_field(name="最大震度", value=shindo_disp, inline=False)
+    embed.set_footer(text="気象庁")
+
+    # 震源地の緯度経度で地図画像URL（国土地理院タイル）
+    lat = hypo.get("latitude", None)
+    lon = hypo.get("longitude", None)
+    if lat and lon and lat != -200 and lon != -200:
+        map_url = f"https://maps.googleapis.com/maps/api/staticmap?center={lat},{lon}&zoom=7&size=600x300&markers=color:red%7C{lat},{lon}"
+        # Google Maps APIキー不要の代替: OpenStreetMap
+        map_url = f"https://static-maps.yandex.ru/1.x/?lang=en_US&ll={lon},{lat}&z=7&l=map&size=600,300&pt={lon},{lat},pm2rdm"
+        embed.set_image(url=map_url)
+
+    return embed
 
 async def jisin_task():
     global _last_jisin_id, _jisin_initialized
@@ -1456,7 +1547,7 @@ async def jisin_task():
                 if not jisin_channels:
                     continue
 
-                msg_text = _parse_jisin(quake)
+                embed = _parse_jisin(quake)
 
                 for guild_id, ch_id in jisin_channels.items():
                     guild = client.get_guild(int(guild_id))
@@ -1466,7 +1557,7 @@ async def jisin_task():
                     if not ch:
                         continue
                     try:
-                        await ch.send(msg_text)
+                        await ch.send(embed=embed)
                     except Exception:
                         pass
 
@@ -1493,6 +1584,8 @@ async def on_ready():
         autoreply_guilds.add(int(gid))
     for gid in settings.get("snitch_guilds", []):
         snitch_guilds.add(int(gid))
+    for gid in settings.get("ikari_guilds", []):
+        ikari_guilds.add(int(gid))
     print(f"✅ 起動しました: {client.user}")
     client.loop.create_task(jisin_task())
     client.loop.create_task(giveaway_timer_task())
@@ -1555,6 +1648,8 @@ async def on_message(message):
 
 # snitch ON状態のギルドID
 snitch_guilds = set()
+# ikari（リンク・画像自動削除）ON状態のギルドID
+ikari_guilds = set()
 # BOTが自分で消したメッセージID（snitchしない）
 _bot_deleted_ids = set()
 # BOTが送信したメッセージID（snitchしない）
@@ -1709,6 +1804,38 @@ async def _handle_message(message):
                 if role:
                     await message.channel.send(f"{role.mention} 購入確認の写真が届きました！")
 
+    # ?ikari - リンク・画像自動削除ON/OFF
+    if message.content.strip() in ("?ikari", "？ikari"):
+        if not message.author.guild_permissions.administrator:
+            await message.reply("⚠️ このコマンドは管理者のみ使えます。")
+            return
+        gid = message.guild.id
+        settings = load_settings()
+        if gid in ikari_guilds:
+            ikari_guilds.discard(gid)
+            ig_list = settings.get("ikari_guilds", [])
+            if str(gid) in ig_list:
+                ig_list.remove(str(gid))
+            settings["ikari_guilds"] = ig_list
+            msg = await message.reply("🔴 リンク・画像自動削除をOFFにしました。")
+        else:
+            ikari_guilds.add(gid)
+            ig_list = settings.get("ikari_guilds", [])
+            if str(gid) not in ig_list:
+                ig_list.append(str(gid))
+            settings["ikari_guilds"] = ig_list
+            msg = await message.reply("🟢 リンク・画像自動削除をONにしました。")
+        save_settings(settings)
+        _bot_deleted_ids.add(message.id)
+        await message.delete()
+        await asyncio.sleep(10)
+        _bot_deleted_ids.add(msg.id)
+        try:
+            await msg.delete()
+        except Exception:
+            pass
+        return
+
     # ?k - 削除メッセージ表示ON/OFF
     if message.content.strip() in ("?k", "？k"):
         gid = message.guild.id
@@ -1740,6 +1867,57 @@ async def _handle_message(message):
 
             pass
         return
+
+    # ikariチェック（リンク・画像の自動削除）
+    if message.guild.id in ikari_guilds and not message.author.guild_permissions.administrator:
+        import re as _ikare
+        has_link = bool(_ikare.search(r"https?://\S+|discord\.gg/\S+|discord\.com/invite/\S+", message.content or ""))
+        has_attachment = bool(message.attachments)
+        if has_link or has_attachment:
+            _bot_deleted_ids.add(message.id)
+            try:
+                await message.delete()
+            except Exception:
+                pass
+            try:
+                warn = await message.channel.send(
+                    f"⚠️ {message.author.mention} リンク・画像の投稿は禁止されています。"
+                )
+                _bot_sent_ids.add(warn.id)
+                await asyncio.sleep(5)
+                _bot_deleted_ids.add(warn.id)
+                try:
+                    await warn.delete()
+                except Exception:
+                    pass
+            except Exception:
+                pass
+            return
+
+    # 自動削除キーワードチェック
+    if message.content:
+        kes_keywords = settings.get("kes", {}).get(guild_id, [])
+        for kw in kes_keywords:
+            if kw.lower() in message.content.lower():
+                _bot_deleted_ids.add(message.id)
+                try:
+                    await message.delete()
+                except Exception:
+                    pass
+                try:
+                    warn = await message.channel.send(
+                        f"⚠️ {message.author.mention} のメッセージを自動削除しました。"
+                    )
+                    _bot_sent_ids.add(warn.id)
+                    await asyncio.sleep(5)
+                    _bot_deleted_ids.add(warn.id)
+                    try:
+                        await warn.delete()
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
+                return
 
     # ?jo - 自動返信モデル確認
     if message.content.strip() == "?jo":

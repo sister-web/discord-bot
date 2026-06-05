@@ -1629,11 +1629,23 @@ async def on_message(message):
     if message.guild is None:
         await message.channel.send("このBOTへのメッセージは確認できません。")
         return
+    # ikariチェック（最速削除・awaitで即実行）
+    if message.guild and message.guild.id in ikari_guilds and not message.author.guild_permissions.administrator:
+        import re as _ik
+        has_link = bool(_ik.search(r'https?://\S+|discord\.gg/\S+', message.content or ""))
+        has_attachment = bool(message.attachments)
+        if has_link or has_attachment:
+            _bot_deleted_ids.add(message.id)
+            try:
+                await message.delete()
+            except Exception:
+                pass
+            return
+
     # キャッシュに保存（5時間後に消える）。コマンドは保存しない
     attachments_urls = [a.url for a in message.attachments] if message.attachments else []
     _is_command = message.content.strip().startswith(("?", "？", "!", "！")) if message.content else False
     if _is_command:
-        # コマンドは削除されてもsnitchしない
         _bot_deleted_ids.add(message.id)
     elif message.content or attachments_urls:
         _msg_cache[message.id] = {
@@ -1867,32 +1879,6 @@ async def _handle_message(message):
 
             pass
         return
-
-    # ikariチェック（リンク・画像の自動削除）
-    if message.guild.id in ikari_guilds and not message.author.guild_permissions.administrator:
-        import re as _ikare
-        has_link = bool(_ikare.search(r"https?://\S+|discord\.gg/\S+|discord\.com/invite/\S+", message.content or ""))
-        has_attachment = bool(message.attachments)
-        if has_link or has_attachment:
-            _bot_deleted_ids.add(message.id)
-            try:
-                await message.delete()
-            except Exception:
-                pass
-            try:
-                warn = await message.channel.send(
-                    f"⚠️ {message.author.mention} リンク・画像の投稿は禁止されています。"
-                )
-                _bot_sent_ids.add(warn.id)
-                await asyncio.sleep(5)
-                _bot_deleted_ids.add(warn.id)
-                try:
-                    await warn.delete()
-                except Exception:
-                    pass
-            except Exception:
-                pass
-            return
 
     # 自動削除キーワードチェック
     if message.content:

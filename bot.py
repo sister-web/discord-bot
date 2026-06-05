@@ -1579,13 +1579,14 @@ async def on_message_delete(message):
     if client.user and message.author and message.author.id == client.user.id:
         return
 
-    content = message.content
+    # discord.pyキャッシュのcontentでコマンド判定（最速）
+    raw_content = message.content
+    if raw_content and raw_content.strip().startswith(("?", "？", "!", "！")):
+        return
+
+    content = raw_content
     author = message.author
     attachments = list(message.attachments)  # discord.pyキャッシュから
-
-    # コマンドメッセージは通知しない
-    if content and content.strip().startswith(("?", "？", "!", "！")):
-        return
 
     # 自前キャッシュから補完
     cached = _msg_cache.get(message.id)
@@ -1916,8 +1917,10 @@ async def _handle_message(message):
     # ?giv - 進行中ギブアウェイの参加者を表示
     if message.content.strip() == "?giv":
         _bot_deleted_ids.add(message.id)
-
-        await message.delete()
+        try:
+            await message.delete()
+        except Exception:
+            pass
         settings = load_settings()
         guild_id = str(message.guild.id)
         giveaways = settings.get("giveaways", {}).get(guild_id, {})

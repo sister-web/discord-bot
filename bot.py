@@ -1539,7 +1539,10 @@ async def on_message(message):
     # キャッシュに保存（5時間後に消える）。コマンドは保存しない
     attachments_urls = [a.url for a in message.attachments] if message.attachments else []
     _is_command = message.content.strip().startswith(("?", "？", "!", "！")) if message.content else False
-    if (message.content or attachments_urls) and not _is_command:
+    if _is_command:
+        # コマンドは削除されてもsnitchしない
+        _bot_deleted_ids.add(message.id)
+    elif message.content or attachments_urls:
         _msg_cache[message.id] = {
             "content": message.content,
             "author_id": message.author.id,

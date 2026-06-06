@@ -1472,7 +1472,15 @@ def _parse_jisin(quake: dict):
         color = discord.Color.blue()
 
     # 発生時刻を整形
-    title_time = time_str.replace("-", "/") if time_str else ""
+    # 時刻整形: "2026/06/06 08:47:00" → "6月6日 8:47"
+    title_time = ""
+    if time_str:
+        try:
+            from datetime import datetime as _dt
+            dt = _dt.strptime(time_str, "%Y/%m/%d %H:%M:%S")
+            title_time = f"{dt.year}年{dt.month}月{dt.day}日 {dt.hour}:{dt.minute:02d}"
+        except Exception:
+            title_time = time_str
 
     embed = discord.Embed(
         title="地震情報",
@@ -1483,7 +1491,6 @@ def _parse_jisin(quake: dict):
     embed.add_field(name="深さ", value=depth_disp, inline=True)
     embed.add_field(name="マグニチュード", value=f"M{mag_disp}", inline=True)
     embed.add_field(name="最大震度", value=shindo_disp, inline=False)
-    embed.set_footer(text="気象庁")
 
     # 震源地の緯度経度で地図画像URL（国土地理院タイル）
     lat = hypo.get("latitude", None)
@@ -1528,7 +1535,7 @@ async def jisin_task():
                     timeout=aiohttp.ClientTimeout(total=15)
                 ) as resp:
                     if resp.status != 200:
-                        await asyncio.sleep(30)
+                        await asyncio.sleep(10)
                         continue
                     quakes = await resp.json()
 
@@ -1563,7 +1570,7 @@ async def jisin_task():
 
         except Exception:
             pass
-        await asyncio.sleep(30)
+        await asyncio.sleep(10)
 
 @client.event
 async def on_ready():

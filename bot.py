@@ -531,6 +531,50 @@ async def create_giveaway(interaction: discord.Interaction):
 
 # ==================== チケットクローズ確認ビュー ====================
 
+class RobloxIDModal(discord.ui.Modal):
+    def __init__(self, ticket_type: str):
+        super().__init__(title=f"Roblox IDを入力 - {ticket_type}")
+        self.ticket_type = ticket_type
+        self.roblox_id = discord.ui.TextInput(
+            label="Roblox ID",
+            placeholder="1234567890",
+            required=True,
+            max_length=20
+        )
+        self.add_item(self.roblox_id)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        settings = load_settings()
+        guild_id = str(interaction.guild.id)
+        ticket_cfg = settings.get("ticket", {}).get(guild_id, {})
+        
+        # チケットチャンネル作成
+        category_id = ticket_cfg.get("category_id")
+        category = interaction.guild.get_channel(int(category_id)) if category_id else None
+        
+        ch = await interaction.guild.create_text_channel(
+            name=f"ticket-{self.ticket_type}-{interaction.user.name}",
+            category=category
+        )
+        
+        owner_id = str(interaction.user.id)
+        open_tickets = ticket_cfg.get("open_tickets", {})
+        open_tickets[owner_id] = str(ch.id)
+        ticket_cfg["open_tickets"] = open_tickets
+        settings["ticket"][guild_id] = ticket_cfg
+        save_settings(settings)
+        
+        # チャンネルに情報を表示
+        embed = discord.Embed(
+            title=f"🎫 {self.ticket_type}",
+            description=f"{interaction.user.mention} のチケットです。\n\n✅ Roblox ID入力済み",
+            color=discord.Color.blue()
+        )
+        await ch.send(embed=embed)
+        await ch.send(f"管理者が対応するまでお待ちください。")
+        
+        await interaction.response.send_message(f"✅ チケットを作成しました: {ch.mention}", ephemeral=True)
+
 class CloseConfirmView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -816,62 +860,18 @@ class TicketCreateButton(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="🎫 チケットを作成", style=discord.ButtonStyle.primary, custom_id="ticket_create")
-    async def create_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
-        settings = load_settings()
-        guild_id = str(interaction.guild.id)
-        ticket_cfg = settings.get("ticket", {}).get(guild_id, {})
-        category_id = ticket_cfg.get("category_id")
-        mention_role_id = ticket_cfg.get("mention_role_id")
+    @discord.ui.button(label="🎫 DoDo HUB購入", style=discord.ButtonStyle.primary, custom_id="ticket_purchase")
+    async def ticket_purchase(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(RobloxIDModal("DoDo HUB購入"))
+    
+    @discord.ui.button(label="🎫 代行", style=discord.ButtonStyle.primary, custom_id="ticket_agency")
+    async def ticket_agency(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(RobloxIDModal("代行"))
+    
+    @discord.ui.button(label="🎫 Giveaway", style=discord.ButtonStyle.primary, custom_id="ticket_giveaway")
+    async def ticket_giveaway(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(RobloxIDModal("Giveaway"))
 
-        existing = ticket_cfg.get("open_tickets", {}).get(str(interaction.user.id))
-        if existing:
-            ch = interaction.guild.get_channel(int(existing))
-            if ch:
-                await interaction.response.send_message(f"⚠️ すでにチケットがあります: {ch.mention}", ephemeral=True)
-                return
-
-        category = interaction.guild.get_channel(int(category_id)) if category_id else None
-        overwrites = {
-            interaction.guild.default_role: discord.PermissionOverwrite(view_channel=False),
-            interaction.user: discord.PermissionOverwrite(view_channel=True, send_messages=True),
-            interaction.guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True),
-        }
-        if mention_role_id:
-            role = interaction.guild.get_role(int(mention_role_id))
-            if role:
-                overwrites[role] = discord.PermissionOverwrite(view_channel=True, send_messages=True)
-
-        ch = await interaction.guild.create_text_channel(
-            f"ticket-{interaction.user.name}",
-            category=category,
-            overwrites=overwrites
-        )
-
-        if "ticket" not in settings:
-            settings["ticket"] = {}
-        if guild_id not in settings["ticket"]:
-            settings["ticket"][guild_id] = {}
-        if "open_tickets" not in settings["ticket"][guild_id]:
-            settings["ticket"][guild_id]["open_tickets"] = {}
-        settings["ticket"][guild_id]["open_tickets"][str(interaction.user.id)] = str(ch.id)
-        save_settings(settings)
-
-        await interaction.response.send_message(f"✅ チケットを作成しました: {ch.mention}", ephemeral=True)
-
-        mention_txt = ""
-        if mention_role_id:
-            role = interaction.guild.get_role(int(mention_role_id))
-            if role:
-                mention_txt = role.mention
-
-        desc = f"{interaction.user.mention} のチケットです。\nまずRoblox IDを入力してください。"
-        embed = discord.Embed(title="🎫 チケット", description=desc, color=discord.Color.blue())
-        await ch.send(content=mention_txt if mention_txt else None, embed=embed, view=TicketPanelView(str(interaction.user.id)))
-
-
-class RobloxIDModal(discord.ui.Modal, title="Roblox IDを入力"):
-    roblox_id = discord.ui.TextInput(label="Roblox ID", placeholder="hanakuso", required=True)
 
     def __init__(self, user_id: str):
         super().__init__()

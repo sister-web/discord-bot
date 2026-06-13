@@ -587,6 +587,10 @@ class RobloxIDModal(discord.ui.Modal):
         if "open_tickets" not in settings["ticket"][guild_id]:
             settings["ticket"][guild_id]["open_tickets"] = {}
         settings["ticket"][guild_id]["open_tickets"][owner_id] = str(ch.id)
+        # Roblox IDを保存（ログ用）
+        if "ticket_data" not in settings["ticket"][guild_id]:
+            settings["ticket"][guild_id]["ticket_data"] = {}
+        settings["ticket"][guild_id]["ticket_data"][owner_id] = {"roblox_id": self.roblox_id.value.strip()}
         save_settings(settings)
 
         roblox_id_val = self.roblox_id.value.strip()
@@ -620,6 +624,30 @@ class RobloxIDModal(discord.ui.Modal):
 
         await interaction.response.send_message(f"✅ チケットを作成しました: {ch.mention}", ephemeral=True)
 
+async def _get_roblox_avatar(username: str) -> str | None:
+    """Robloxユーザー名からアバター画像URLを取得"""
+    try:
+        import aiohttp as _ah
+        async with _ah.ClientSession() as session:
+            async with session.post(
+                "https://users.roblox.com/v1/usernames/users",
+                json={"usernames": [username], "excludeBannedUsers": False}
+            ) as resp:
+                data = await resp.json()
+                users = data.get("data", [])
+                if not users:
+                    return None
+                user_id = users[0]["id"]
+            async with session.get(
+                f"https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds={user_id}&size=150x150&format=Png"
+            ) as resp:
+                thumb = await resp.json()
+                items = thumb.get("data", [])
+                if items:
+                    return items[0].get("imageUrl")
+    except Exception:
+        return None
+
 class ProductChoiceView(discord.ui.View):
     def __init__(self, owner_id: str, roblox_id: str):
         super().__init__(timeout=None)
@@ -627,21 +655,28 @@ class ProductChoiceView(discord.ui.View):
         self.roblox_id = roblox_id
 
     @discord.ui.button(label="DoDo HUB", style=discord.ButtonStyle.secondary, custom_id="product_dodohub")
-    @discord.ui.button(label="DoDo HUB", style=discord.ButtonStyle.secondary, custom_id="product_dodohub")
     async def choose_dodohub(self, interaction: discord.Interaction, button: discord.ui.Button):
+        avatar_url = await _get_roblox_avatar(self.roblox_id)
         embed = discord.Embed(title="🎫 DoDo HUB購入", color=discord.Color.blue())
-        embed.add_field(name="Roblox ID", value=self.roblox_id, inline=False)
-        embed.add_field(name="商品", value="DoDo HUB", inline=False)
-        await interaction.response.edit_message(content=None, embed=embed, view=None)
+        embed.add_field(name="Roblox ID", value=self.roblox_id, inline=True)
+        embed.add_field(name="商品", value="DoDo HUB", inline=True)
+        if avatar_url:
+            embed.set_thumbnail(url=avatar_url)
+        # メンションを維持したまま編集
+        await interaction.response.edit_message(embed=embed, view=None)
         await interaction.channel.send("管理者が対応するまでお待ちください。")
 
     @discord.ui.button(label="DoDo HUB lua", style=discord.ButtonStyle.primary, custom_id="product_dodohublua")
     async def choose_dodohublua(self, interaction: discord.Interaction, button: discord.ui.Button):
+        avatar_url = await _get_roblox_avatar(self.roblox_id)
         embed = discord.Embed(title="🎫 DoDo HUB購入", color=discord.Color.blue())
-        embed.add_field(name="Roblox ID", value=self.roblox_id, inline=False)
-        embed.add_field(name="商品", value="DoDo HUB lua", inline=False)
-        await interaction.response.edit_message(content=None, embed=embed, view=None)
+        embed.add_field(name="Roblox ID", value=self.roblox_id, inline=True)
+        embed.add_field(name="商品", value="DoDo HUB lua", inline=True)
+        if avatar_url:
+            embed.set_thumbnail(url=avatar_url)
+        await interaction.response.edit_message(embed=embed, view=None)
         await interaction.channel.send("管理者が対応するまでお待ちください。")
+
 
 
 class CloseConfirmView(discord.ui.View):

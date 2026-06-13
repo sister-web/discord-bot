@@ -547,33 +547,104 @@ class RobloxIDModal(discord.ui.Modal):
         settings = load_settings()
         guild_id = str(interaction.guild.id)
         ticket_cfg = settings.get("ticket", {}).get(guild_id, {})
-        
-        # チケットチャンネル作成
+
+        # 既存チケットチェック
+        open_tickets = ticket_cfg.get("open_tickets", {})
+        owner_id = str(interaction.user.id)
+        existing = open_tickets.get(owner_id)
+        if existing:
+            ch_existing = interaction.guild.get_channel(int(existing))
+            if ch_existing:
+                await interaction.response.send_message(f"⚠️ すでにチケットがあります: {ch_existing.mention}", ephemeral=True)
+                return
+
         category_id = ticket_cfg.get("category_id")
         category = interaction.guild.get_channel(int(category_id)) if category_id else None
-        
+        mention_role_id = ticket_cfg.get("mention_role_id")
+
+        # チケット作成者と管理者ロールのみ閲覧可能
+        overwrites = {
+            interaction.guild.default_role: discord.PermissionOverwrite(view_channel=False),
+            interaction.user: discord.PermissionOverwrite(view_channel=True, send_messages=True),
+            interaction.guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True),
+        }
+        if mention_role_id:
+            role = interaction.guild.get_role(int(mention_role_id))
+            if role:
+                overwrites[role] = discord.PermissionOverwrite(view_channel=True, send_messages=True)
+
         ch = await interaction.guild.create_text_channel(
-            name=f"ticket-{self.ticket_type}-{interaction.user.name}",
-            category=category
+            name=f"ticket-{interaction.user.name}",
+            category=category,
+            overwrites=overwrites
         )
-        
-        owner_id = str(interaction.user.id)
-        open_tickets = ticket_cfg.get("open_tickets", {})
-        open_tickets[owner_id] = str(ch.id)
-        ticket_cfg["open_tickets"] = open_tickets
-        settings["ticket"][guild_id] = ticket_cfg
+
+        # settings更新
+        if "ticket" not in settings:
+            settings["ticket"] = {}
+        if guild_id not in settings["ticket"]:
+            settings["ticket"][guild_id] = {}
+        if "open_tickets" not in settings["ticket"][guild_id]:
+            settings["ticket"][guild_id]["open_tickets"] = {}
+        settings["ticket"][guild_id]["open_tickets"][owner_id] = str(ch.id)
         save_settings(settings)
-        
-        # チャンネルに情報を表示
+
+        roblox_id_val = self.roblox_id.value.strip()
+
+        if self.ticket_type == "DoDo HUB購入":
+            # 商品選択ビューを送信
+            embed = discord.Embed(
+                title="🎫 DoDo HUB購入",
+                description=f"{interaction.user.mention} のチケットです。\n\nRoblox ID: `{roblox_id_val}`",
+                color=discord.Color.blue()
+            )
+            await ch.send(embed=embed)
+            # 管理者メンション
+            if mention_role_id:
+                role = interaction.guild.get_role(int(mention_role_id))
+                if role:
+                    await ch.send(role.mention)
+            await ch.send("商品を選択してください。", view=ProductChoiceView(owner_id, roblox_id_val))
+        else:
+            embed = discord.Embed(
+                title=f"🎫 {self.ticket_type}",
+                description=f"{interaction.user.mention} のチケットです。\n\nRoblox ID: `{roblox_id_val}`",
+                color=discord.Color.blue()
+            )
+            await ch.send(embed=embed)
+            if mention_role_id:
+                role = interaction.guild.get_role(int(mention_role_id))
+                if role:
+                    await ch.send(role.mention)
+            await ch.send("管理者が対応するまでお待ちください。")
+
+        await interaction.response.send_message(f"✅ チケットを作成しました: {ch.mention}", ephemeral=True)
+
+class ProductChoiceView(discord.ui.View):
+    def __init__(self, owner_id: str, roblox_id: str):
+        super().__init__(timeout=None)
+        self.owner_id = owner_id
+        self.roblox_id = roblox_id
+
+    @discord.ui.button(label="DoDo HUB", style=discord.ButtonStyle.secondary, custom_id="product_dodohub")
+    async def choose_dodohub(self, interaction: discord.Interaction, button: discord.ui.Button):
         embed = discord.Embed(
-            title=f"🎫 {self.ticket_type}",
-            description=f"{interaction.user.mention} のチケットです。\n\n✅ Roblox ID入力済み",
+            title="🎫 DoDo HUB購入",
+            description=f"{interaction.user.mention} のチケットです。\n\nRoblox ID: `{self.roblox_id}`\n商品: **DoDo HUB**",
             color=discord.Color.blue()
         )
-        await ch.send(embed=embed)
-        await ch.send(f"管理者が対応するまでお待ちください。")
-        
-        await interaction.response.send_message(f"✅ チケットを作成しました: {ch.mention}", ephemeral=True)
+        await interaction.message.edit(content=None, embed=embed, view=None)
+        await interaction.response.send_message("管理者が対応するまでお待ちください。")
+
+    @discord.ui.button(label="DoDo HUB lua", style=discord.ButtonStyle.primary, custom_id="product_dodohublua")
+    async def choose_dodohublua(self, interaction: discord.Interaction, button: discord.ui.Button):
+        embed = discord.Embed(
+            title="🎫 DoDo HUB購入",
+            description=f"{interaction.user.mention} のチケットです。\n\nRoblox ID: `{self.roblox_id}`\n商品: **DoDo HUB lua**",
+            color=discord.Color.blue()
+        )
+        await interaction.message.edit(content=None, embed=embed, view=None)
+        await interaction.response.send_message("管理者が対応するまでお待ちください。")
 
 class CloseConfirmView(discord.ui.View):
     def __init__(self):

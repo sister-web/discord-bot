@@ -592,30 +592,30 @@ class RobloxIDModal(discord.ui.Modal):
         roblox_id_val = self.roblox_id.value.strip()
 
         if self.ticket_type == "DoDo HUB購入":
-            # 商品選択ビューを送信
             embed = discord.Embed(
-                title="🎫 DoDo HUB購入",
-                description=f"{interaction.user.mention} のチケットです。\n\nRoblox ID: `{roblox_id_val}`",
+                title="商品を選択してください",
                 color=discord.Color.blue()
             )
-            await ch.send(embed=embed)
-            # 管理者メンション
+            embed.add_field(name="Roblox ID", value=roblox_id_val, inline=False)
+            mention_text = ""
             if mention_role_id:
                 role = interaction.guild.get_role(int(mention_role_id))
                 if role:
-                    await ch.send(role.mention)
-            await ch.send("商品を選択してください。", view=ProductChoiceView(owner_id, roblox_id_val))
+                    mention_text = role.mention
+            await ch.send(content=mention_text if mention_text else None, embed=embed, view=ProductChoiceView(owner_id, roblox_id_val))
         else:
             embed = discord.Embed(
                 title=f"🎫 {self.ticket_type}",
-                description=f"{interaction.user.mention} のチケットです。\n\nRoblox ID: `{roblox_id_val}`",
                 color=discord.Color.blue()
             )
-            await ch.send(embed=embed)
+            embed.add_field(name=f"{interaction.user.mention} のチケットです。", value="", inline=False)
+            embed.add_field(name="Roblox ID", value=roblox_id_val, inline=False)
+            mention_text = ""
             if mention_role_id:
                 role = interaction.guild.get_role(int(mention_role_id))
                 if role:
-                    await ch.send(role.mention)
+                    mention_text = role.mention
+            await ch.send(content=mention_text if mention_text else None, embed=embed)
             await ch.send("管理者が対応するまでお待ちください。")
 
         await interaction.response.send_message(f"✅ チケットを作成しました: {ch.mention}", ephemeral=True)
@@ -627,24 +627,22 @@ class ProductChoiceView(discord.ui.View):
         self.roblox_id = roblox_id
 
     @discord.ui.button(label="DoDo HUB", style=discord.ButtonStyle.secondary, custom_id="product_dodohub")
+    @discord.ui.button(label="DoDo HUB", style=discord.ButtonStyle.secondary, custom_id="product_dodohub")
     async def choose_dodohub(self, interaction: discord.Interaction, button: discord.ui.Button):
-        embed = discord.Embed(
-            title="🎫 DoDo HUB購入",
-            description=f"{interaction.user.mention} のチケットです。\n\nRoblox ID: `{self.roblox_id}`\n商品: **DoDo HUB**",
-            color=discord.Color.blue()
-        )
-        await interaction.message.edit(content=None, embed=embed, view=None)
-        await interaction.response.send_message("管理者が対応するまでお待ちください。")
+        embed = discord.Embed(title="🎫 DoDo HUB購入", color=discord.Color.blue())
+        embed.add_field(name="Roblox ID", value=self.roblox_id, inline=False)
+        embed.add_field(name="商品", value="DoDo HUB", inline=False)
+        await interaction.response.edit_message(content=None, embed=embed, view=None)
+        await interaction.channel.send("管理者が対応するまでお待ちください。")
 
     @discord.ui.button(label="DoDo HUB lua", style=discord.ButtonStyle.primary, custom_id="product_dodohublua")
     async def choose_dodohublua(self, interaction: discord.Interaction, button: discord.ui.Button):
-        embed = discord.Embed(
-            title="🎫 DoDo HUB購入",
-            description=f"{interaction.user.mention} のチケットです。\n\nRoblox ID: `{self.roblox_id}`\n商品: **DoDo HUB lua**",
-            color=discord.Color.blue()
-        )
-        await interaction.message.edit(content=None, embed=embed, view=None)
-        await interaction.response.send_message("管理者が対応するまでお待ちください。")
+        embed = discord.Embed(title="🎫 DoDo HUB購入", color=discord.Color.blue())
+        embed.add_field(name="Roblox ID", value=self.roblox_id, inline=False)
+        embed.add_field(name="商品", value="DoDo HUB lua", inline=False)
+        await interaction.response.edit_message(content=None, embed=embed, view=None)
+        await interaction.channel.send("管理者が対応するまでお待ちください。")
+
 
 class CloseConfirmView(discord.ui.View):
     def __init__(self):

@@ -872,7 +872,9 @@ class TicketCreateButton(discord.ui.View):
     async def ticket_giveaway(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(RobloxIDModal("Giveaway"))
 
+# ==================== 古い商品選択パネル ====================
 
+class ProductSelectView(discord.ui.View):
     def __init__(self, user_id: str):
         super().__init__()
         self.user_id = user_id

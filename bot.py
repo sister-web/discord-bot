@@ -1945,11 +1945,18 @@ async def _handle_message(message):
         username = user.name
         created_at = user.created_at.strftime("%Y/%m/%d")
 
-        embed = discord.Embed(color=discord.Color.blue())
-        embed.add_field(name="表示名", value=display_name, inline=True)
-        embed.add_field(name="ユーザー名", value=username, inline=True)
-        embed.add_field(name="アカウント作成日", value=created_at, inline=True)
-        embed.set_thumbnail(url=user.display_avatar.url)
+        # ユーザーのアクセントカラーを取得（プロフィールバナー色など）
+        try:
+            full_user = await client.fetch_user(user.id)
+            embed_color = full_user.accent_color or discord.Color.blue()
+        except Exception:
+            embed_color = discord.Color.blue()
+
+        embed = discord.Embed(color=embed_color)
+        embed.add_field(name="表示名", value=f"{display_name}\n", inline=True)
+        embed.add_field(name="ユーザー名", value=f"{username}\n", inline=True)
+        embed.add_field(name="アカウント作成日", value=f"{created_at}\n", inline=True)
+        embed.set_thumbnail(url=user.display_avatar.with_size(256).url)
         await message.channel.send(embed=embed)
         return
 

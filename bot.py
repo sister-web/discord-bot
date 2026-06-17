@@ -1929,6 +1929,30 @@ async def _handle_message(message):
                 if role:
                     await message.channel.send(f"{role.mention} 購入確認の写真が届きました！")
 
+    # ?c ユーザーID - ユーザー情報パネル表示
+    if message.content.startswith("?c "):
+        target_id_str = message.content[3:].strip()
+        if not target_id_str.isdigit():
+            await message.reply("⚠️ 正しいユーザーIDを入力してください。", delete_after=5)
+            return
+        try:
+            user = await client.fetch_user(int(target_id_str))
+        except Exception:
+            await message.reply("⚠️ ユーザーが見つかりません。", delete_after=5)
+            return
+
+        display_name = user.global_name or user.name
+        username = user.name
+        created_at = user.created_at.strftime("%Y/%m/%d")
+
+        embed = discord.Embed(color=discord.Color.blue())
+        embed.add_field(name="表示名", value=display_name, inline=True)
+        embed.add_field(name="ユーザー名", value=username, inline=True)
+        embed.add_field(name="アカウント作成日", value=created_at, inline=True)
+        embed.set_thumbnail(url=user.display_avatar.url)
+        await message.channel.send(embed=embed)
+        return
+
     # ?ikari - リンク・画像自動削除ON/OFF
     if message.content.strip() in ("?ikari", "？ikari"):
         if not message.author.guild_permissions.administrator:

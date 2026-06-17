@@ -624,6 +624,33 @@ class RobloxIDModal(discord.ui.Modal):
 
         await interaction.response.send_message(f"✅ チケットを作成しました: {ch.mention}", ephemeral=True)
 
+async def _get_dominant_color(image_url: str) -> discord.Color:
+    """画像URLから主要色を抽出してdiscord.Colorを返す"""
+    try:
+        import aiohttp as _ah
+        from PIL import Image
+        import io as _io
+        async with _ah.ClientSession() as session:
+            async with session.get(image_url) as resp:
+                img_bytes = await resp.read()
+        img = Image.open(_io.BytesIO(img_bytes)).convert("RGB")
+        img = img.resize((50, 50))
+        pixels = list(img.getdata())
+        # 単純平均ではなく最頻出色に近いクラスタを使う（彩度を重視）
+        from collections import Counter
+        # 量子化して近い色をまとめる
+        quantized = [(r // 32 * 32, g // 32 * 32, b // 32 * 32) for r, g, b in pixels]
+        counter = Counter(quantized)
+        # 黒・白・グレーに近い色は除外して鮮やかな色を優先
+        candidates = [c for c in counter.keys() if not (max(c) - min(c) < 20)]
+        if candidates:
+            most_common = max(candidates, key=lambda c: counter[c])
+        else:
+            most_common = counter.most_common(1)[0][0]
+        return discord.Color.from_rgb(*most_common)
+    except Exception:
+        return discord.Color.blue()
+
 async def _get_roblox_avatar(username: str) -> str | None:
     """Robloxユーザー名からアバター画像URLを取得"""
     try:
@@ -1945,18 +1972,14 @@ async def _handle_message(message):
         username = user.name
         created_at = user.created_at.strftime("%Y/%m/%d")
 
-        # ユーザーのアクセントカラーを取得（プロフィールバナー色など）
-        try:
-            full_user = await client.fetch_user(user.id)
-            embed_color = full_user.accent_color or discord.Color.blue()
-        except Exception:
-            embed_color = discord.Color.blue()
+        avatar_url = user.display_avatar.with_size(256).url
+        embed_color = await _get_dominant_color(avatar_url)
 
         embed = discord.Embed(color=embed_color)
-        embed.add_field(name="表示名", value=f"{display_name}\n", inline=True)
-        embed.add_field(name="ユーザー名", value=f"{username}\n", inline=True)
-        embed.add_field(name="アカウント作成日", value=f"{created_at}\n", inline=True)
-        embed.set_thumbnail(url=user.display_avatar.with_size(256).url)
+        embed.add_field(name="表示名", value=f"{display_name}\n\u200b", inline=True)
+        embed.add_field(name="ユーザー名", value=f"{username}\n\u200b", inline=True)
+        embed.add_field(name="アカウント作成日", value=f"{created_at}\n\u200b", inline=True)
+        embed.set_thumbnail(url=avatar_url)
         await message.channel.send(embed=embed)
         return
 

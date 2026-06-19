@@ -1548,6 +1548,8 @@ async def keslist_error(interaction: discord.Interaction, error):
 
 _kati_base_rates = {}  # 基準レート（パネル作成時）
 
+EXCHANGERATE_API_KEY = "0bf014ade6ae8bd589facd26"
+
 async def _fetch_rates() -> dict:
     """複数APIから主要通貨→JPYレートを取得（フォールバック対応）"""
     import aiohttp as _ah
@@ -1555,6 +1557,20 @@ async def _fetch_rates() -> dict:
     headers = {"User-Agent": "Mozilla/5.0 (compatible; DiscordBot)"}
 
     async with _ah.ClientSession() as session:
+        # 0. ExchangeRate-API（最優先）
+        try:
+            async with session.get(
+                f"https://v6.exchangerate-api.com/v6/{EXCHANGERATE_API_KEY}/latest/JPY",
+                headers=headers, timeout=_ah.ClientTimeout(total=10)
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    rates = data.get("conversion_rates", {})
+                    if rates:
+                        return {cur: round(1 / rates[cur], 4) for cur in targets if cur in rates and rates[cur]}
+        except Exception as e:
+            print(f"[kati] ExchangeRate-API失敗: {e}")
+
         # 1. frankfurter.app
         try:
             async with session.get(

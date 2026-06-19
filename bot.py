@@ -1584,8 +1584,12 @@ def _build_kati_embed(rates: dict, base: dict) -> discord.Embed:
         name = name_jp.get(cur, cur)
         base_rate = base.get(cur, rate)
         diff = rate - base_rate
-        arrow = "🔺" if diff > 0 else ("🔻" if diff < 0 else "➡️")
-        diff_str = f"{arrow} {abs(diff):.4f}" if diff != 0 else "➡️ ±0"
+        if diff > 0:
+            diff_str = f"🔺 +{diff:.2f}円"
+        elif diff < 0:
+            diff_str = f"🔻 {diff:.2f}円"
+        else:
+            diff_str = "➡️ ±0円"
 
         # 1通貨→JPY
         to_jpy = rate
@@ -1593,9 +1597,9 @@ def _build_kati_embed(rates: dict, base: dict) -> discord.Embed:
         from_jpy = round(100 / rate, 4) if rate else 0
 
         line = f"{f_icon} **{cur}** ({name})\n"
-        line += f"　1{cur} = **{to_jpy:.2f}円** {diff_str}\n"
-        line += f"　100円 = {from_jpy}{cur}"
-        lines.append(line)
+        line = f"{f_icon} **{cur}** ({name})\\n"
+        line += f"\u30001{cur}: {base_rate:.2f}円 → **{to_jpy:.2f}円** {diff_str}\\n"
+        line += f"\u3000100円 = {from_jpy}{cur}"
 
     embed.description = "\n\n".join(lines)
     from datetime import datetime, timezone, timedelta
@@ -1623,7 +1627,11 @@ async def kati_cmd(interaction: discord.Interaction, チャンネル: discord.Te
     settings = load_settings()
     if "kati" not in settings:
         settings["kati"] = {}
-    settings["kati"][guild_id] = {"channel_id": str(チャンネル.id), "message_id": str(msg.id)}
+    settings["kati"][guild_id] = {
+        "channel_id": str(チャンネル.id),
+        "message_id": str(msg.id),
+        "base_rates": rates.copy()
+    }
     save_settings(settings)
     await interaction.followup.send(f"✅ 為替パネルを {チャンネル.mention} に作成しました。", ephemeral=True)
 
@@ -1656,7 +1664,7 @@ async def _kati_update_task():
                 if not ch:
                     continue
                 msg = await ch.fetch_message(int(cfg["message_id"]))
-                base = _kati_base_rates.get(guild_id, rates)
+                base = _kati_base_rates.get(guild_id) or cfg.get("base_rates", rates)
                 embed = _build_kati_embed(rates, base)
                 await msg.edit(embed=embed)
             except Exception:
@@ -1846,6 +1854,11 @@ async def on_ready():
         ikari_guilds.add(int(gid))
     print(f"✅ 起動しました: {client.user}")
     client.loop.create_task(jisin_task())
+    # 為替基準レートを復元
+    _kati_settings = load_settings().get("kati", {})
+    for _gid, _cfg in _kati_settings.items():
+        if "base_rates" in _cfg:
+            _kati_base_rates[_gid] = _cfg["base_rates"]
     client.loop.create_task(_kati_update_task())
     client.loop.create_task(giveaway_timer_task())
     client.loop.create_task(_cache_cleanup_task())

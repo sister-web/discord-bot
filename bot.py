@@ -1544,6 +1544,124 @@ async def keslist_error(interaction: discord.Interaction, error):
     if isinstance(error, app_commands.MissingPermissions):
         await interaction.response.send_message("⚠️ このコマンドは管理者のみ使えます。", ephemeral=True)
 
+# ==================== 為替レートパネル ====================
+
+_kati_base_rates = {}  # 基準レート（パネル作成時）
+
+async def _fetch_rates() -> dict:
+    """frankfurter.appから主要通貨→JPYレートを取得"""
+    import aiohttp as _ah
+    currencies = "USD,EUR,GBP,CNY,KRW,AUD,CAD,CHF,HKD,SGD"
+    try:
+        async with _ah.ClientSession() as session:
+            async with session.get(
+                f"https://api.frankfurter.app/latest?from=JPY&to={currencies}"
+            ) as resp:
+                data = await resp.json()
+                # JPY→各通貨のレート
+                jpy_to = data.get("rates", {})
+                # 各通貨→JPYに変換
+                to_jpy = {cur: round(1 / rate, 4) for cur, rate in jpy_to.items() if rate}
+                return to_jpy
+    except Exception:
+        return {}
+
+def _build_kati_embed(rates: dict, base: dict) -> discord.Embed:
+    flag = {"USD":"🇺🇸","EUR":"🇪🇺","GBP":"🇬🇧","CNY":"🇨🇳","KRW":"🇰🇷",
+            "AUD":"🇦🇺","CAD":"🇨🇦","CHF":"🇨🇭","HKD":"🇭🇰","SGD":"🇸🇬"}
+    name_jp = {"USD":"米ドル","EUR":"ユーロ","GBP":"英ポンド","CNY":"人民元",
+               "KRW":"韓国ウォン","AUD":"豪ドル","CAD":"カナダドル",
+               "CHF":"スイスフラン","HKD":"香港ドル","SGD":"シンガポールドル"}
+
+    embed = discord.Embed(
+        title="💱 リアルタイム為替レート",
+        color=discord.Color.gold()
+    )
+
+    lines = []
+    for cur, rate in rates.items():
+        f_icon = flag.get(cur, "")
+        name = name_jp.get(cur, cur)
+        base_rate = base.get(cur, rate)
+        diff = rate - base_rate
+        arrow = "🔺" if diff > 0 else ("🔻" if diff < 0 else "➡️")
+        diff_str = f"{arrow} {abs(diff):.4f}" if diff != 0 else "➡️ ±0"
+
+        # 1通貨→JPY
+        to_jpy = rate
+        # 100JPY→通貨
+        from_jpy = round(100 / rate, 4) if rate else 0
+
+        line = f"{f_icon} **{cur}** ({name})\n"
+        line += f"　1{cur} = **{to_jpy:.2f}円** {diff_str}\n"
+        line += f"　100円 = {from_jpy}{cur}"
+        lines.append(line)
+
+    embed.description = "\n\n".join(lines)
+    from datetime import datetime, timezone, timedelta
+    jst = timezone(timedelta(hours=9))
+    now = datetime.now(jst).strftime("%Y/%m/%d %H:%M JST")
+    embed.set_footer(text=f"最終更新: {now}")
+    return embed
+
+@tree.command(name="kati", description="為替レートパネルを指定チャンネルに作成します（管理者のみ）")
+@app_commands.describe(チャンネル="パネルを送るチャンネル")
+@app_commands.checks.has_permissions(administrator=True)
+async def kati_cmd(interaction: discord.Interaction, チャンネル: discord.TextChannel):
+    await interaction.response.defer(ephemeral=True)
+    rates = await _fetch_rates()
+    if not rates:
+        await interaction.followup.send("⚠️ レート取得に失敗しました。", ephemeral=True)
+        return
+
+    guild_id = str(interaction.guild.id)
+    _kati_base_rates[guild_id] = rates.copy()
+
+    embed = _build_kati_embed(rates, rates)
+    msg = await チャンネル.send(embed=embed)
+
+    settings = load_settings()
+    if "kati" not in settings:
+        settings["kati"] = {}
+    settings["kati"][guild_id] = {"channel_id": str(チャンネル.id), "message_id": str(msg.id)}
+    save_settings(settings)
+    await interaction.followup.send(f"✅ 為替パネルを {チャンネル.mention} に作成しました。", ephemeral=True)
+
+@kati_cmd.error
+async def kati_error(interaction, error):
+    if isinstance(error, app_commands.MissingPermissions):
+        await interaction.response.send_message("⚠️ 管理者のみ使えます。", ephemeral=True)
+
+@client.event
+async def kati_task_runner():
+    pass  # on_readyで起動
+
+async def _kati_update_task():
+    await client.wait_until_ready()
+    while not client.is_closed():
+        await asyncio.sleep(300)  # 5分ごと
+        settings = load_settings()
+        kati_settings = settings.get("kati", {})
+        if not kati_settings:
+            continue
+        rates = await _fetch_rates()
+        if not rates:
+            continue
+        for guild_id, cfg in kati_settings.items():
+            try:
+                guild = client.get_guild(int(guild_id))
+                if not guild:
+                    continue
+                ch = guild.get_channel(int(cfg["channel_id"]))
+                if not ch:
+                    continue
+                msg = await ch.fetch_message(int(cfg["message_id"]))
+                base = _kati_base_rates.get(guild_id, rates)
+                embed = _build_kati_embed(rates, base)
+                await msg.edit(embed=embed)
+            except Exception:
+                pass
+
 @tree.command(name="jisin", description="地震速報を送るチャンネルを設定します（管理者のみ）")
 @app_commands.describe(チャンネル="通知を送るチャンネル")
 @app_commands.checks.has_permissions(administrator=True)
@@ -1728,6 +1846,7 @@ async def on_ready():
         ikari_guilds.add(int(gid))
     print(f"✅ 起動しました: {client.user}")
     client.loop.create_task(jisin_task())
+    client.loop.create_task(_kati_update_task())
     client.loop.create_task(giveaway_timer_task())
     client.loop.create_task(_cache_cleanup_task())
 

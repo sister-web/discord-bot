@@ -1549,22 +1549,62 @@ async def keslist_error(interaction: discord.Interaction, error):
 _kati_base_rates = {}  # 基準レート（パネル作成時）
 
 async def _fetch_rates() -> dict:
-    """frankfurter.appから主要通貨→JPYレートを取得"""
+    """複数APIから主要通貨→JPYレートを取得（フォールバック対応）"""
     import aiohttp as _ah
-    currencies = "USD,EUR,GBP,CNY,KRW,AUD,CAD,CHF,HKD,SGD"
-    try:
-        async with _ah.ClientSession() as session:
+    targets = ["USD","EUR","GBP","CNY","KRW","AUD","CAD","CHF","HKD","SGD"]
+    headers = {"User-Agent": "Mozilla/5.0 (compatible; DiscordBot)"}
+
+    async with _ah.ClientSession() as session:
+        # 1. frankfurter.app
+        try:
             async with session.get(
-                f"https://api.frankfurter.app/latest?from=JPY&to={currencies}"
+                f"https://api.frankfurter.app/latest?from=JPY&to={','.join(targets)}",
+                headers=headers, timeout=_ah.ClientTimeout(total=10)
             ) as resp:
-                data = await resp.json()
-                # JPY→各通貨のレート
-                jpy_to = data.get("rates", {})
-                # 各通貨→JPYに変換
-                to_jpy = {cur: round(1 / rate, 4) for cur, rate in jpy_to.items() if rate}
-                return to_jpy
-    except Exception:
-        return {}
+                if resp.status == 200:
+                    data = await resp.json()
+                    jpy_to = data.get("rates", {})
+                    if jpy_to:
+                        return {cur: round(1 / rate, 4) for cur, rate in jpy_to.items() if rate}
+        except Exception:
+            pass
+
+        # 2. open.er-api.com
+        try:
+            async with session.get(
+                "https://open.er-api.com/v6/latest/JPY",
+                headers=headers, timeout=_ah.ClientTimeout(total=10)
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    rates = data.get("rates", {})
+                    if rates:
+                        return {cur: round(1 / rates[cur], 4) for cur in targets if cur in rates and rates[cur]}
+        except Exception:
+            pass
+
+        # 3. jsdelivr currency-api
+        try:
+            async with session.get(
+                "https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/jpy.min.json",
+                headers=headers, timeout=_ah.ClientTimeout(total=10)
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    jpy = data.get("jpy", {})
+                    if jpy:
+                        result = {}
+                        for cur in targets:
+                            r = jpy.get(cur.lower())
+                            if r and r > 0:
+                                result[cur] = round(1 / r, 4)
+                        if result:
+                            return result
+        except Exception:
+            pass
+
+    print("[kati] 全APIからのレート取得に失敗しました")
+    return {}
 
 def _build_kati_embed(rates: dict, base: dict) -> discord.Embed:
     flag = {"USD":"🇺🇸","EUR":"🇪🇺","GBP":"🇬🇧","CNY":"🇨🇳","KRW":"🇰🇷",

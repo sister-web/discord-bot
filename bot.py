@@ -1557,17 +1557,24 @@ async def _fetch_rates() -> dict:
     headers = {"User-Agent": "Mozilla/5.0 (compatible; DiscordBot)"}
 
     async with _ah.ClientSession() as session:
-        # 0. ExchangeRate-API（最優先）
+        # 0. ExchangeRate-API（最優先・USDベース経由でJPY換算）
         try:
             async with session.get(
-                f"https://v6.exchangerate-api.com/v6/{EXCHANGERATE_API_KEY}/latest/JPY",
+                f"https://v6.exchangerate-api.com/v6/{EXCHANGERATE_API_KEY}/latest/USD",
                 headers=headers, timeout=_ah.ClientTimeout(total=10)
             ) as resp:
                 if resp.status == 200:
                     data = await resp.json()
                     rates = data.get("conversion_rates", {})
-                    if rates:
-                        return {cur: round(1 / rates[cur], 4) for cur in targets if cur in rates and rates[cur]}
+                    if rates and "JPY" in rates:
+                        usd_to_jpy = rates["JPY"]  # 1USD = ?JPY
+                        result = {}
+                        for cur in targets:
+                            if cur in rates and rates[cur]:
+                                # 1USD = rates[cur] → 1cur = usd_to_jpy/rates[cur] JPY
+                                result[cur] = round(usd_to_jpy / rates[cur], 4)
+                        if result:
+                            return result
         except Exception as e:
             print(f"[kati] ExchangeRate-API失敗: {e}")
 
@@ -1957,6 +1964,10 @@ async def on_message(message):
     if message.guild is None:
         await message.channel.send("このBOTへのメッセージは確認できません。")
         return
+    # コマンドは即_bot_deleted_idsに登録（on_message_deleteより前に確実に）
+    if message.content and message.content.strip().startswith(("?", "？", "!", "！")):
+        _bot_deleted_ids.add(message.id)
+
     # ikariチェック（最速削除・awaitで即実行）
     if message.guild and message.guild.id in ikari_guilds and not message.author.guild_permissions.administrator:
         import re as _ik

@@ -1675,9 +1675,6 @@ def _build_kati_embed(rates: dict, base: dict) -> discord.Embed:
 
 _status_panel = {}  # guild_id -> {channel_id, message_id}
 
-WINDOWS_EXECUTORS = ["Solara", "Wave", "Delta", "Seliware", "Xeno", "Swift", "Horizon", "Cryptic", "AWP"]
-IOS_EXECUTORS = ["Delta", "Seliware", "Cryptic"]
-
 async def _fetch_executor_status():
     """WEAO APIから全executorのstatusを取得"""
     import aiohttp as _ah
@@ -1704,52 +1701,38 @@ def _build_status_embed(data: list) -> discord.Embed:
         color=discord.Color.blurple()
     )
 
-    # データをdict化
-    status_map = {}
-    if data:
-        for item in data:
-            name = item.get("title") or item.get("name") or ""
-            status_map[name.lower()] = item
-
-    def get_status_line(name: str, item: dict) -> str:
-        if not item:
-            return f"❓ **{name}** — 情報なし"
-        updated = item.get("updateStatus", "")
-        detected = item.get("detected", False)
-        # updated/not updated判定
-        is_updated = str(updated).lower() in ("updated", "working", "true", "1")
+    def get_status_line(item: dict) -> str:
+        name = item.get("title", "Unknown")
+        is_updated = bool(item.get("updateStatus", False))
         status_icon = "🟢" if is_updated else "🔴"
         status_text = "Updated" if is_updated else "Not Updated"
-        # sUNC
-        sunc_val = item.get("sUNC") or item.get("sunc") or ""
-        unc_val = item.get("UNC") or item.get("unc") or ""
-        sunc_str = f"sUNC: {sunc_val}%" if sunc_val else ""
-        unc_str = f"UNC: {unc_val}%" if unc_val else ""
-        extras = " | ".join(filter(None, [sunc_str, unc_str]))
-        detect_str = " ⚠️検出あり" if detected else ""
-        line = f"{status_icon} **{name}** — {status_text}{detect_str}"
+        sunc = item.get("suncPercentage")
+        unc = item.get("uncPercentage")
+        extras = []
+        if sunc is not None:
+            extras.append(f"sUNC: {sunc}%")
+        if unc is not None:
+            extras.append(f"UNC: {unc}%")
+        line = f"{status_icon} **{name}** — {status_text}"
         if extras:
-            line += f"\n　{extras}"
+            line += f"  ({' | '.join(extras)})"
         return line
 
-    # Windows
+    # hidden=Trueは除外、platformで分類
     win_lines = []
-    for name in WINDOWS_EXECUTORS:
-        item = status_map.get(name.lower(), {})
-        if item:
-            platform = item.get("platform", "")
-            if "mobile" in str(platform).lower() or "ios" in str(platform).lower():
-                continue
-        win_lines.append(get_status_line(name, item))
-
-    # iOS/iPhone
     ios_lines = []
+
     if data:
-        for item in data:
+        # indexでソート
+        sorted_data = sorted(data, key=lambda x: x.get("index", 99))
+        for item in sorted_data:
+            if item.get("hidden", False):
+                continue
             platform = str(item.get("platform", "")).lower()
-            if "mobile" in platform or "ios" in platform or "iphone" in platform:
-                name = item.get("title") or item.get("name") or "Unknown"
-                ios_lines.append(get_status_line(name, item))
+            if platform in ("windows",):
+                win_lines.append(get_status_line(item))
+            elif platform in ("ios", "iphone"):
+                ios_lines.append(get_status_line(item))
 
     embed.add_field(
         name="🖥️ Windows Executors",

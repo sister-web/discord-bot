@@ -1671,6 +1671,144 @@ def _build_kati_embed(rates: dict, base: dict) -> discord.Embed:
     embed.set_footer(text=f"最終更新: {now}")
     return embed
 
+# ==================== Executor Status ====================
+
+_status_panel = {}  # guild_id -> {channel_id, message_id}
+
+WINDOWS_EXECUTORS = ["Solara", "Wave", "Delta", "Seliware", "Xeno", "Swift", "Horizon", "Cryptic", "AWP"]
+IOS_EXECUTORS = ["Delta", "Seliware", "Cryptic"]
+
+async def _fetch_executor_status():
+    """WEAO APIから全executorのstatusを取得"""
+    import aiohttp as _ah
+    try:
+        async with _ah.ClientSession() as session:
+            async with session.get(
+                "https://weao.xyz/api/status/exploits",
+                headers={"User-Agent": "WEAO-3PService"},
+                timeout=_ah.ClientTimeout(total=10)
+            ) as resp:
+                if resp.status == 200:
+                    return await resp.json()
+    except Exception as e:
+        print(f"[status] API失敗: {e}")
+    return None
+
+def _build_status_embed(data: list) -> discord.Embed:
+    from datetime import datetime, timezone, timedelta
+    jst = timezone(timedelta(hours=9))
+    now = datetime.now(jst).strftime("%Y/%m/%d %H:%M JST")
+
+    embed = discord.Embed(
+        title="🎮 Executor Status",
+        color=discord.Color.blurple()
+    )
+
+    # データをdict化
+    status_map = {}
+    if data:
+        for item in data:
+            name = item.get("title") or item.get("name") or ""
+            status_map[name.lower()] = item
+
+    def get_status_line(name: str, item: dict) -> str:
+        if not item:
+            return f"❓ **{name}** — 情報なし"
+        updated = item.get("updateStatus", "")
+        detected = item.get("detected", False)
+        # updated/not updated判定
+        is_updated = str(updated).lower() in ("updated", "working", "true", "1")
+        status_icon = "🟢" if is_updated else "🔴"
+        status_text = "Updated" if is_updated else "Not Updated"
+        # sUNC
+        sunc_val = item.get("sUNC") or item.get("sunc") or ""
+        unc_val = item.get("UNC") or item.get("unc") or ""
+        sunc_str = f"sUNC: {sunc_val}%" if sunc_val else ""
+        unc_str = f"UNC: {unc_val}%" if unc_val else ""
+        extras = " | ".join(filter(None, [sunc_str, unc_str]))
+        detect_str = " ⚠️検出あり" if detected else ""
+        line = f"{status_icon} **{name}** — {status_text}{detect_str}"
+        if extras:
+            line += f"\n　{extras}"
+        return line
+
+    # Windows
+    win_lines = []
+    for name in WINDOWS_EXECUTORS:
+        item = status_map.get(name.lower(), {})
+        if item:
+            platform = item.get("platform", "")
+            if "mobile" in str(platform).lower() or "ios" in str(platform).lower():
+                continue
+        win_lines.append(get_status_line(name, item))
+
+    # iOS/iPhone
+    ios_lines = []
+    if data:
+        for item in data:
+            platform = str(item.get("platform", "")).lower()
+            if "mobile" in platform or "ios" in platform or "iphone" in platform:
+                name = item.get("title") or item.get("name") or "Unknown"
+                ios_lines.append(get_status_line(name, item))
+
+    embed.add_field(
+        name="🖥️ Windows Executors",
+        value="\n".join(win_lines) if win_lines else "データなし",
+        inline=False
+    )
+    embed.add_field(
+        name="📱 iPhone/iOS Executors",
+        value="\n".join(ios_lines) if ios_lines else "データなし",
+        inline=False
+    )
+    embed.set_footer(text=f"最終更新: {now} | powered by weao.xyz")
+    return embed
+
+async def _status_update_task():
+    await client.wait_until_ready()
+    prev_data = None
+    while not client.is_closed():
+        data = await _fetch_executor_status()
+        if data and data != prev_data:
+            prev_data = data
+            settings = load_settings()
+            for guild_id, cfg in settings.get("status_panel", {}).items():
+                try:
+                    guild = client.get_guild(int(guild_id))
+                    if not guild:
+                        continue
+                    ch = guild.get_channel(int(cfg["channel_id"]))
+                    if not ch:
+                        continue
+                    msg = await ch.fetch_message(int(cfg["message_id"]))
+                    embed = _build_status_embed(data)
+                    await msg.edit(embed=embed)
+                except Exception:
+                    pass
+        await asyncio.sleep(60)
+
+@tree.command(name="status", description="Executor Statusパネルをこのチャンネルに作成します（管理者のみ）")
+@app_commands.checks.has_permissions(administrator=True)
+async def status_cmd(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    data = await _fetch_executor_status()
+    embed = _build_status_embed(data or [])
+    msg = await interaction.channel.send(embed=embed)
+    settings = load_settings()
+    if "status_panel" not in settings:
+        settings["status_panel"] = {}
+    settings["status_panel"][str(interaction.guild.id)] = {
+        "channel_id": str(interaction.channel.id),
+        "message_id": str(msg.id)
+    }
+    save_settings(settings)
+    await interaction.followup.send("✅ Statusパネルを作成しました。", ephemeral=True)
+
+@status_cmd.error
+async def status_error(interaction, error):
+    if isinstance(error, app_commands.MissingPermissions):
+        await interaction.response.send_message("⚠️ 管理者のみ使えます。", ephemeral=True)
+
 @tree.command(name="kati", description="為替レートパネルを指定チャンネルに作成します（管理者のみ）")
 @app_commands.describe(チャンネル="パネルを送るチャンネル")
 @app_commands.checks.has_permissions(administrator=True)
@@ -1923,6 +2061,7 @@ async def on_ready():
         if "base_rates" in _cfg:
             _kati_base_rates[_gid] = _cfg["base_rates"]
     client.loop.create_task(_kati_update_task())
+    client.loop.create_task(_status_update_task())
     client.loop.create_task(giveaway_timer_task())
     client.loop.create_task(_cache_cleanup_task())
 

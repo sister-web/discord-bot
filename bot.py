@@ -1718,7 +1718,7 @@ def _build_status_embed(data: list) -> discord.Embed:
             line += f"  ({' | '.join(extras)})"
         return line
 
-    # hidden=Trueは除外、platformで分類（external除く）
+    # hidden=Trueは除外、extypeで分類（wexternal除く）
     win_lines = []
     ios_lines = []
 
@@ -1727,12 +1727,10 @@ def _build_status_embed(data: list) -> discord.Embed:
         for item in sorted_data:
             if item.get("hidden", False):
                 continue
-            platform = str(item.get("platform", "")).lower()
-            if "external" in platform:
-                continue
-            if platform == "windows":
+            extype = str(item.get("extype", "")).lower()
+            if extype == "wexecutor":
                 win_lines.append(get_status_line(item))
-            elif platform in ("ios", "iphone"):
+            elif extype in ("iexecutor",):
                 ios_lines.append(get_status_line(item))
 
     embed.add_field(
@@ -1781,8 +1779,8 @@ def _build_external_embed(data: list) -> discord.Embed:
         for item in sorted_data:
             if item.get("hidden", False):
                 continue
-            platform = str(item.get("platform", "")).lower()
-            if "external" in platform:
+            extype = str(item.get("extype", "")).lower()
+            if extype == "wexternal":
                 ext_lines.append(get_status_line(item))
 
     embed.add_field(

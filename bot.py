@@ -1718,18 +1718,19 @@ def _build_status_embed(data: list) -> discord.Embed:
             line += f"  ({' | '.join(extras)})"
         return line
 
-    # hidden=Trueは除外、platformで分類
+    # hidden=Trueは除外、platformで分類（external除く）
     win_lines = []
     ios_lines = []
 
     if data:
-        # indexでソート
         sorted_data = sorted(data, key=lambda x: x.get("index", 99))
         for item in sorted_data:
             if item.get("hidden", False):
                 continue
             platform = str(item.get("platform", "")).lower()
-            if platform in ("windows",):
+            if "external" in platform:
+                continue
+            if platform == "windows":
                 win_lines.append(get_status_line(item))
             elif platform in ("ios", "iphone"):
                 ios_lines.append(get_status_line(item))
@@ -1747,6 +1748,51 @@ def _build_status_embed(data: list) -> discord.Embed:
     embed.set_footer(text=f"最終更新: {now} | powered by weao.xyz")
     return embed
 
+def _build_external_embed(data: list) -> discord.Embed:
+    from datetime import datetime, timezone, timedelta
+    jst = timezone(timedelta(hours=9))
+    now = datetime.now(jst).strftime("%Y/%m/%d %H:%M JST")
+
+    embed = discord.Embed(
+        title="🔌 External Executor Status",
+        color=discord.Color.og_blurple()
+    )
+
+    def get_status_line(item: dict) -> str:
+        name = item.get("title", "Unknown")
+        is_updated = bool(item.get("updateStatus", False))
+        status_icon = "🟢" if is_updated else "🔴"
+        status_text = "Updated" if is_updated else "Not Updated"
+        sunc = item.get("suncPercentage")
+        unc = item.get("uncPercentage")
+        extras = []
+        if sunc is not None:
+            extras.append(f"sUNC: {sunc}%")
+        if unc is not None:
+            extras.append(f"UNC: {unc}%")
+        line = f"{status_icon} **{name}** — {status_text}"
+        if extras:
+            line += f"  ({' | '.join(extras)})"
+        return line
+
+    ext_lines = []
+    if data:
+        sorted_data = sorted(data, key=lambda x: x.get("index", 99))
+        for item in sorted_data:
+            if item.get("hidden", False):
+                continue
+            platform = str(item.get("platform", "")).lower()
+            if "external" in platform:
+                ext_lines.append(get_status_line(item))
+
+    embed.add_field(
+        name="🔌 External Executors",
+        value="\n".join(ext_lines) if ext_lines else "データなし",
+        inline=False
+    )
+    embed.set_footer(text=f"最終更新: {now} | powered by weao.xyz")
+    return embed
+
 async def _status_update_task():
     await client.wait_until_ready()
     prev_data = None
@@ -1755,6 +1801,7 @@ async def _status_update_task():
         if data and data != prev_data:
             prev_data = data
             settings = load_settings()
+            # 通常パネル更新
             for guild_id, cfg in settings.get("status_panel", {}).items():
                 try:
                     guild = client.get_guild(int(guild_id))
@@ -1764,8 +1811,20 @@ async def _status_update_task():
                     if not ch:
                         continue
                     msg = await ch.fetch_message(int(cfg["message_id"]))
-                    embed = _build_status_embed(data)
-                    await msg.edit(embed=embed)
+                    await msg.edit(embed=_build_status_embed(data))
+                except Exception:
+                    pass
+            # externalパネル更新
+            for guild_id, cfg in settings.get("status1_panel", {}).items():
+                try:
+                    guild = client.get_guild(int(guild_id))
+                    if not guild:
+                        continue
+                    ch = guild.get_channel(int(cfg["channel_id"]))
+                    if not ch:
+                        continue
+                    msg = await ch.fetch_message(int(cfg["message_id"]))
+                    await msg.edit(embed=_build_external_embed(data))
                 except Exception:
                     pass
         await asyncio.sleep(60)
@@ -1789,6 +1848,28 @@ async def status_cmd(interaction: discord.Interaction):
 
 @status_cmd.error
 async def status_error(interaction, error):
+    if isinstance(error, app_commands.MissingPermissions):
+        await interaction.response.send_message("⚠️ 管理者のみ使えます。", ephemeral=True)
+
+@tree.command(name="status1", description="External Executor Statusパネルをこのチャンネルに作成します（管理者のみ）")
+@app_commands.checks.has_permissions(administrator=True)
+async def status1_cmd(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    data = await _fetch_executor_status()
+    embed = _build_external_embed(data or [])
+    msg = await interaction.channel.send(embed=embed)
+    settings = load_settings()
+    if "status1_panel" not in settings:
+        settings["status1_panel"] = {}
+    settings["status1_panel"][str(interaction.guild.id)] = {
+        "channel_id": str(interaction.channel.id),
+        "message_id": str(msg.id)
+    }
+    save_settings(settings)
+    await interaction.followup.send("✅ External Statusパネルを作成しました。", ephemeral=True)
+
+@status1_cmd.error
+async def status1_error(interaction, error):
     if isinstance(error, app_commands.MissingPermissions):
         await interaction.response.send_message("⚠️ 管理者のみ使えます。", ephemeral=True)
 

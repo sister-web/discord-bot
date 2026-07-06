@@ -1705,7 +1705,6 @@ def _build_status_embed(data: list) -> discord.Embed:
         name = item.get("title", "Unknown")
         is_updated = bool(item.get("updateStatus", False))
         status_icon = "🟢" if is_updated else "🔴"
-        status_text = "Updated" if is_updated else "Not Updated"
         sunc = item.get("suncPercentage")
         unc = item.get("uncPercentage")
         extras = []
@@ -1713,10 +1712,10 @@ def _build_status_embed(data: list) -> discord.Embed:
             extras.append(f"sUNC: {sunc}%")
         if unc is not None:
             extras.append(f"UNC: {unc}%")
-        line = f"{status_icon} **{name}** — {status_text}"
         if extras:
-            line += f"  ({' | '.join(extras)})"
-        return line
+            return f"{status_icon} **{name}** {{{' | '.join(extras)}}}"
+        else:
+            return f"{status_icon} **{name}**"
 
     # hidden=Trueは除外、extypeで分類（wexternal除く）
     win_lines = []
@@ -1760,7 +1759,6 @@ def _build_external_embed(data: list) -> discord.Embed:
         name = item.get("title", "Unknown")
         is_updated = bool(item.get("updateStatus", False))
         status_icon = "🟢" if is_updated else "🔴"
-        status_text = "Updated" if is_updated else "Not Updated"
         sunc = item.get("suncPercentage")
         unc = item.get("uncPercentage")
         extras = []
@@ -1768,10 +1766,10 @@ def _build_external_embed(data: list) -> discord.Embed:
             extras.append(f"sUNC: {sunc}%")
         if unc is not None:
             extras.append(f"UNC: {unc}%")
-        line = f"{status_icon} **{name}** — {status_text}"
         if extras:
-            line += f"  ({' | '.join(extras)})"
-        return line
+            return f"{status_icon} **{name}** {{{' | '.join(extras)}}}"
+        else:
+            return f"{status_icon} **{name}**"
 
     ext_lines = []
     if data:

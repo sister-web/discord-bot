@@ -2166,6 +2166,12 @@ async def on_message(message):
     # コマンドは即_bot_deleted_idsに登録（on_message_deleteより前に確実に）
     if message.content and message.content.strip().startswith(("?", "？", "!", "！")):
         _bot_deleted_ids.add(message.id)
+        # ?sineは最速削除（Webhook送信前に即消す）
+        if message.content.startswith("?sine ") and message.guild and message.author.guild_permissions.administrator:
+            try:
+                await message.delete()
+            except Exception:
+                pass
 
     # ikariチェック（最速削除・awaitで即実行）
     if message.guild and message.guild.id in ikari_guilds and not message.author.guild_permissions.administrator:
@@ -2198,6 +2204,8 @@ async def on_message(message):
 
 # snitch ON状態のギルドID
 snitch_guilds = set()
+# Webhookキャッシュ channel_id -> webhook
+_sine_webhook_cache = {}
 # ikari（リンク・画像自動削除）ON状態のギルドID
 ikari_guilds = set()
 # BOTが自分で消したメッセージID（snitchしない）
@@ -2384,12 +2392,6 @@ async def _handle_message(message):
     # ?sine メッセージ - Webhookでアプリとして送信（管理者のみ）
     if message.content.startswith("?sine "):
         if not message.author.guild_permissions.administrator:
-            tmp = await message.reply("⚠️ このコマンドは管理者のみ使えます。")
-            await asyncio.sleep(5)
-            try:
-                await tmp.delete()
-            except Exception:
-                pass
             _bot_deleted_ids.add(message.id)
             try:
                 await message.delete()
@@ -2399,13 +2401,17 @@ async def _handle_message(message):
 
         send_text = message.content[6:].strip()
         if not send_text:
-            await message.reply("⚠️ メッセージを入力してください。", delete_after=5)
+            _bot_deleted_ids.add(message.id)
+            try:
+                await message.delete()
+            except Exception:
+                pass
             return
 
-        # 添付ファイルも転送
-        files = []
+        # 添付ファイルを先に取得してからコマンドを即削除
         import aiohttp as _sineh
         import io as _sineio
+        files = []
         for att in message.attachments:
             try:
                 async with _sineh.ClientSession() as s:
@@ -2415,26 +2421,46 @@ async def _handle_message(message):
             except Exception:
                 pass
 
-        # チャンネルのWebhookを取得または作成
+        # コマンドを即削除
+        _bot_deleted_ids.add(message.id)
         try:
-            webhooks = await message.channel.webhooks()
-            wh = next((w for w in webhooks if w.name == "sine_webhook"), None)
-            if not wh:
-                wh = await message.channel.create_webhook(name="sine_webhook")
+            await message.delete()
+        except Exception:
+            pass
 
+        # Webhook送信（キャッシュ使用で高速化）
+        try:
+            ch_id = message.channel.id
+            wh = _sine_webhook_cache.get(ch_id)
+            if not wh:
+                webhooks = await message.channel.webhooks()
+                wh = next((w for w in webhooks if w.name == "sine_webhook"), None)
+                if not wh:
+                    wh = await message.channel.create_webhook(name="sine_webhook")
+                _sine_webhook_cache[ch_id] = wh
             await wh.send(
                 content=send_text,
                 username=message.author.display_name,
                 avatar_url=message.author.display_avatar.url,
                 files=files
             )
-            _bot_deleted_ids.add(message.id)
+        except Exception:
+            # キャッシュが古い場合は再取得
             try:
-                await message.delete()
+                _sine_webhook_cache.pop(message.channel.id, None)
+                webhooks = await message.channel.webhooks()
+                wh = next((w for w in webhooks if w.name == "sine_webhook"), None)
+                if not wh:
+                    wh = await message.channel.create_webhook(name="sine_webhook")
+                _sine_webhook_cache[message.channel.id] = wh
+                await wh.send(
+                    content=send_text,
+                    username=message.author.display_name,
+                    avatar_url=message.author.display_avatar.url,
+                    files=files
+                )
             except Exception:
                 pass
-        except Exception as e:
-            await message.reply(f"⚠️ エラー: {e}", delete_after=5)
         return
 
     # ?ikari - リンク・画像自動削除ON/OFF

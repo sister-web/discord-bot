@@ -784,7 +784,7 @@ async def update_kjnpn(guild):
             continue
         if role_id and not any(str(r.id) == role_id for r in member.roles):
             continue
-        entries.append(member.display_name + "\n``" + str(bal) + "円``")
+        entries.append(member.mention + "\n``" + str(bal) + "円``")
     body = "\n\n".join(entries) if entries else "データなし"
     await msg.edit(content=f"💰 **残高一覧**\n\n{body}")
 
@@ -1309,7 +1309,7 @@ async def show_balances(interaction: discord.Interaction):
             continue
         if role_id and not any(str(r.id) == role_id for r in member.roles):
             continue
-        lines.append(f"{member.display_name}: **{bal}円**")
+        lines.append(f"{member.mention}: **{bal}円**")
 
     if not lines:
         await interaction.response.send_message("残高データがありません。", ephemeral=True)
@@ -2166,12 +2166,46 @@ async def on_message(message):
     # コマンドは即_bot_deleted_idsに登録（on_message_deleteより前に確実に）
     if message.content and message.content.strip().startswith(("?", "？", "!", "！")):
         _bot_deleted_ids.add(message.id)
-        # ?sineは最速削除（Webhook送信前に即消す）
-        if message.content.startswith("?sine ") and message.guild and message.author.guild_permissions.administrator:
+        # ?sineはon_messageで全処理（create_taskを通さず最速）
+        if message.content.startswith("?sine ") and message.guild and hasattr(message.author, 'guild_permissions') and message.author.guild_permissions.administrator:
+            send_text = message.content[6:].strip()
+            # 先に削除
             try:
                 await message.delete()
             except Exception:
                 pass
+            if send_text:
+                import aiohttp as _sineh2
+                import io as _sineio2
+                files = []
+                for att in message.attachments:
+                    try:
+                        async with _sineh2.ClientSession() as s:
+                            async with s.get(att.url) as r:
+                                data = await r.read()
+                        files.append(discord.File(_sineio2.BytesIO(data), filename=att.filename))
+                    except Exception:
+                        pass
+                try:
+                    ch_id = message.channel.id
+                    wh = _sine_webhook_cache.get(ch_id)
+                    if not wh:
+                        webhooks = await message.channel.webhooks()
+                        wh = next((w for w in webhooks if w.name == "sine_webhook"), None)
+                        if not wh:
+                            wh = await message.channel.create_webhook(name="sine_webhook")
+                        _sine_webhook_cache[ch_id] = wh
+                    _am = discord.AllowedMentions(everyone=True, users=True, roles=True)
+                    await wh.send(
+                        content=send_text,
+                        username=message.author.display_name,
+                        avatar_url=message.author.display_avatar.url,
+                        files=files,
+                        allowed_mentions=_am
+                    )
+                except Exception:
+                    _sine_webhook_cache.pop(message.channel.id, None)
+            return
 
     # ikariチェック（最速削除・awaitで即実行）
     if message.guild and message.guild.id in ikari_guilds and not message.author.guild_permissions.administrator:
@@ -2438,11 +2472,13 @@ async def _handle_message(message):
                 if not wh:
                     wh = await message.channel.create_webhook(name="sine_webhook")
                 _sine_webhook_cache[ch_id] = wh
+            _am = discord.AllowedMentions(everyone=True, users=True, roles=True)
             await wh.send(
                 content=send_text,
                 username=message.author.display_name,
                 avatar_url=message.author.display_avatar.url,
-                files=files
+                files=files,
+                allowed_mentions=_am
             )
         except Exception:
             # キャッシュが古い場合は再取得
@@ -2453,11 +2489,13 @@ async def _handle_message(message):
                 if not wh:
                     wh = await message.channel.create_webhook(name="sine_webhook")
                 _sine_webhook_cache[message.channel.id] = wh
+                _am = discord.AllowedMentions(everyone=True, users=True, roles=True)
                 await wh.send(
                     content=send_text,
                     username=message.author.display_name,
                     avatar_url=message.author.display_avatar.url,
-                    files=files
+                    files=files,
+                    allowed_mentions=_am
                 )
             except Exception:
                 pass

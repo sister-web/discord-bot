@@ -2381,6 +2381,62 @@ async def _handle_message(message):
         await message.channel.send(embed=embed)
         return
 
+    # ?sine メッセージ - Webhookでアプリとして送信（管理者のみ）
+    if message.content.startswith("?sine "):
+        if not message.author.guild_permissions.administrator:
+            tmp = await message.reply("⚠️ このコマンドは管理者のみ使えます。")
+            await asyncio.sleep(5)
+            try:
+                await tmp.delete()
+            except Exception:
+                pass
+            _bot_deleted_ids.add(message.id)
+            try:
+                await message.delete()
+            except Exception:
+                pass
+            return
+
+        send_text = message.content[6:].strip()
+        if not send_text:
+            await message.reply("⚠️ メッセージを入力してください。", delete_after=5)
+            return
+
+        # 添付ファイルも転送
+        files = []
+        import aiohttp as _sineh
+        import io as _sineio
+        for att in message.attachments:
+            try:
+                async with _sineh.ClientSession() as s:
+                    async with s.get(att.url) as r:
+                        data = await r.read()
+                files.append(discord.File(_sineio.BytesIO(data), filename=att.filename))
+            except Exception:
+                pass
+
+        # チャンネルのWebhookを取得または作成
+        try:
+            webhooks = await message.channel.webhooks()
+            wh = next((w for w in webhooks if w.name == "sine_webhook"), None)
+            if not wh:
+                wh = await message.channel.create_webhook(name="sine_webhook")
+
+            await wh.send(
+                content=send_text,
+                username=message.author.display_name,
+                avatar_url=message.author.display_avatar.url,
+                files=files
+            )
+            _bot_deleted_ids.add(message.id)
+            try:
+                await message.delete()
+            except Exception:
+                pass
+        except Exception as e:
+            await message.reply(f"⚠️ エラー: {e}", delete_after=5)
+        return
+
     # ?ikari - リンク・画像自動削除ON/OFF
     if message.content.strip() in ("?ikari", "？ikari"):
         if not message.author.guild_permissions.administrator:

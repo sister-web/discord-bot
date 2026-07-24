@@ -2174,7 +2174,7 @@ async def on_message(message):
                 await message.delete()
             except Exception:
                 pass
-            if send_text:
+            if send_text or message.attachments:
                 import aiohttp as _sineh2
                 import io as _sineio2
                 files = []
@@ -2197,7 +2197,7 @@ async def on_message(message):
                         _sine_webhook_cache[ch_id] = wh
                     _am = discord.AllowedMentions(everyone=True, users=True, roles=True)
                     await wh.send(
-                        content=send_text,
+                        content=send_text or None,
                         username=message.author.display_name,
                         avatar_url=message.author.display_avatar.url,
                         files=files,

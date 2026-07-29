@@ -2206,12 +2206,9 @@ async def on_message(message):
             send_text = message.content[5:].strip() if message.content.startswith("?sine") else ""
             import aiohttp as _sineh2
             import io as _sineio2
-            # 削除を先に実行（画像はproxy_urlで後取得可能）
-            try:
-                await message.delete()
-            except Exception:
-                pass
+
             # Webhookを先に取得
+            wh = None
             try:
                 ch_id = message.channel.id
                 wh = _sine_webhook_cache.get(ch_id)
@@ -2223,20 +2220,29 @@ async def on_message(message):
                     _sine_webhook_cache[ch_id] = wh
             except Exception:
                 _sine_webhook_cache.pop(message.channel.id, None)
-                return
-            # 画像ダウンロード（proxy_urlで元の形式維持）
+
+            # 削除前にURLを保存してからダウンロード
+            att_list = [(att.url, att.filename) for att in message.attachments]
+
+            # コマンドメッセージを削除
+            try:
+                await message.delete()
+            except Exception:
+                pass
+
+            # ダウンロード（削除後でもURLは有効）
             files = []
-            for att in message.attachments:
+            for url, fname in att_list:
                 try:
-                    url = att.proxy_url or att.url
-                    fname = att.filename
                     async with _sineh2.ClientSession() as s:
-                        async with s.get(url) as r:
+                        async with s.get(url, headers={"User-Agent": "Mozilla/5.0"}) as r:
                             data = await r.read()
-                    files.append(discord.File(_sineio2.BytesIO(data), filename=fname))
+                    if data:
+                        files.append(discord.File(_sineio2.BytesIO(data), filename=fname))
                 except Exception:
                     pass
-            if send_text or files:
+
+            if (send_text or files) and wh:
                 try:
                     _am = discord.AllowedMentions(everyone=True, users=True, roles=True)
                     await wh.send(

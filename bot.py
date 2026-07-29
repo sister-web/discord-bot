@@ -1931,6 +1931,35 @@ async def _kati_update_task():
             except Exception:
                 pass
 
+@tree.command(name="sindo", description="地震通知の最低震度を設定します（管理者のみ）")
+@app_commands.describe(最低震度="この震度以上の地震のみ通知します")
+@app_commands.choices(最低震度=[
+    app_commands.Choice(name="震度1以上", value=10),
+    app_commands.Choice(name="震度2以上", value=20),
+    app_commands.Choice(name="震度3以上", value=30),
+    app_commands.Choice(name="震度4以上", value=40),
+    app_commands.Choice(name="震度5弱以上", value=45),
+    app_commands.Choice(name="震度5強以上", value=50),
+    app_commands.Choice(name="震度6弱以上", value=55),
+    app_commands.Choice(name="震度6強以上", value=60),
+    app_commands.Choice(name="震度7のみ", value=70),
+])
+@app_commands.checks.has_permissions(administrator=True)
+async def set_sindo(interaction: discord.Interaction, 最低震度: int):
+    settings = load_settings()
+    guild_id = str(interaction.guild.id)
+    if "jisin_min_scale" not in settings:
+        settings["jisin_min_scale"] = {}
+    settings["jisin_min_scale"][guild_id] = 最低震度
+    save_settings(settings)
+    shindo_name = {10:"1",20:"2",30:"3",40:"4",45:"5弱",50:"5強",55:"6弱",60:"6強",70:"7"}.get(最低震度,"不明")
+    await interaction.response.send_message(f"✅ 震度{shindo_name}以上の地震のみ通知します。", ephemeral=True)
+
+@set_sindo.error
+async def sindo_error(interaction, error):
+    if isinstance(error, app_commands.MissingPermissions):
+        await interaction.response.send_message("⚠️ 管理者のみ使えます。", ephemeral=True)
+
 @tree.command(name="jisin", description="地震速報を送るチャンネルを設定します（管理者のみ）")
 @app_commands.describe(チャンネル="通知を送るチャンネル")
 @app_commands.checks.has_permissions(administrator=True)
@@ -2074,9 +2103,14 @@ async def jisin_task():
                 if not jisin_channels:
                     continue
 
-                embed = _parse_jisin(quake)
-
                 for guild_id, ch_id in jisin_channels.items():
+                    # 最低震度チェック
+                    min_scale = settings.get("jisin_min_scale", {}).get(guild_id, 10)
+                    quake_scale = quake.get("earthquake", {}).get("maxScale", -1)
+                    if quake_scale != -1 and quake_scale < min_scale:
+                        continue
+
+                    embed = _parse_jisin(quake)
                     guild = client.get_guild(int(guild_id))
                     if not guild:
                         continue
@@ -2167,34 +2201,43 @@ async def on_message(message):
     if message.content and message.content.strip().startswith(("?", "？", "!", "！")):
         _bot_deleted_ids.add(message.id)
         # ?sineはon_messageで全処理（create_taskを通さず最速）
-        if message.content.startswith("?sine ") and message.guild and hasattr(message.author, 'guild_permissions') and message.author.guild_permissions.administrator:
-            send_text = message.content[6:].strip()
-            # 先に削除
+        _is_sine = (message.content.startswith("?sine ") or message.content.strip() == "?sine")
+        if _is_sine and message.guild and hasattr(message.author, 'guild_permissions') and message.author.guild_permissions.administrator:
+            send_text = message.content[5:].strip() if message.content.startswith("?sine") else ""
+            import aiohttp as _sineh2
+            import io as _sineio2
+            # 削除を先に実行（画像はproxy_urlで後取得可能）
             try:
                 await message.delete()
             except Exception:
                 pass
-            if send_text or message.attachments:
-                import aiohttp as _sineh2
-                import io as _sineio2
-                files = []
-                for att in message.attachments:
-                    try:
-                        async with _sineh2.ClientSession() as s:
-                            async with s.get(att.url) as r:
-                                data = await r.read()
-                        files.append(discord.File(_sineio2.BytesIO(data), filename=att.filename))
-                    except Exception:
-                        pass
-                try:
-                    ch_id = message.channel.id
-                    wh = _sine_webhook_cache.get(ch_id)
+            # Webhookを先に取得
+            try:
+                ch_id = message.channel.id
+                wh = _sine_webhook_cache.get(ch_id)
+                if not wh:
+                    webhooks = await message.channel.webhooks()
+                    wh = next((w for w in webhooks if w.name == "sine_webhook"), None)
                     if not wh:
-                        webhooks = await message.channel.webhooks()
-                        wh = next((w for w in webhooks if w.name == "sine_webhook"), None)
-                        if not wh:
-                            wh = await message.channel.create_webhook(name="sine_webhook")
-                        _sine_webhook_cache[ch_id] = wh
+                        wh = await message.channel.create_webhook(name="sine_webhook")
+                    _sine_webhook_cache[ch_id] = wh
+            except Exception:
+                _sine_webhook_cache.pop(message.channel.id, None)
+                return
+            # 画像ダウンロード（proxy_urlで元の形式維持）
+            files = []
+            for att in message.attachments:
+                try:
+                    url = att.proxy_url or att.url
+                    fname = att.filename
+                    async with _sineh2.ClientSession() as s:
+                        async with s.get(url) as r:
+                            data = await r.read()
+                    files.append(discord.File(_sineio2.BytesIO(data), filename=fname))
+                except Exception:
+                    pass
+            if send_text or files:
+                try:
                     _am = discord.AllowedMentions(everyone=True, users=True, roles=True)
                     await wh.send(
                         content=send_text or None,
